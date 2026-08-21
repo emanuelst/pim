@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..ad7d0c9
+index 0000000..aa078b3
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,406 @@
+@@ -0,0 +1,408 @@
 +import Foundation
 +import SwiftUI
 +
@@ -313,6 +313,7 @@ index 0000000..ad7d0c9
 +    @State private var selection: PimSession.ID?
 +    let onOpen: (PimSession) -> Void
 +    let onNew: () -> Void
++    let onToggleActive: (PimSession) -> Void
 +
 +    var body: some View {
 +        VStack(spacing: 0) {
@@ -371,6 +372,7 @@ index 0000000..ad7d0c9
 +                    .contextMenu {
 +                        Button(store.isKeptActive(session) ? "Stop in Background" : "Keep Active") {
 +                            store.toggleKeptActive(session)
++                            onToggleActive(session)
 +                        }
 +                        Button(store.isUnread(session) ? "Mark as Read" : "Mark as Unread") {
 +                            if store.isUnread(session) {
@@ -411,7 +413,7 @@ index 0000000..ad7d0c9
 +    }
 +}
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..c7535ab 100644
+index 340a0b4..4f09d45 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -58,6 +58,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
@@ -451,7 +453,7 @@ index 340a0b4..c7535ab 100644
  
          // Setup our notifications for behaviors
          let center = NotificationCenter.default
-@@ -1051,6 +1061,86 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1061,98 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
  
@@ -502,6 +504,18 @@ index 340a0b4..c7535ab 100644
 +        pimSurfaces[currentSession] = focusedSurface
 +    }
 +
++    private func togglePimActive(_ session: PimSession) {
++        if pimSessionStore.isKeptActive(session) {
++            if session.id == currentPimSession || session.id == pimSessionStore.activeSession {
++                retainCurrentPimSurfaceIfNeeded()
++            } else if pimSurfaces[session.id] == nil, let ghosttyApp = ghostty.app {
++                pimSurfaces[session.id] = makePimSurface(session, app: ghosttyApp, background: true)
++            }
++        } else if session.id != currentPimSession {
++            pimSurfaces.removeValue(forKey: session.id)
++        }
++    }
++
 +    private func startKeptPimSessions() {
 +        guard let ghosttyApp = ghostty.app else { return }
 +        let visible = pimSessionStore.activeSession
@@ -538,7 +552,7 @@ index 340a0b4..c7535ab 100644
      // MARK: - NSWindowController
  
      override func windowWillLoad() {
-@@ -1085,7 +1175,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1085,7 +1187,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
  
          // Initialize our content view to the SwiftUI root
          let container = TerminalViewContainer {
@@ -550,13 +564,14 @@ index 340a0b4..c7535ab 100644
 +                        self?.pimSessionStore.markRead(session)
 +                        self?.openPimSession(session)
 +                    },
-+                    onNew: { [weak self] in self?.newPimChat() })
++                    onNew: { [weak self] in self?.newPimChat() },
++                    onToggleActive: { [weak self] session in self?.togglePimActive(session) })
 +                TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
 +            }
          }
  
          // Set the initial content size on the container so that
-@@ -1095,6 +1194,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,6 +1207,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
  
          window.contentView = container
