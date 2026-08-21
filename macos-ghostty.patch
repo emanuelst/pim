@@ -744,6 +744,58 @@ index bfe42b1..1c8aca7 100644
              let defaultValue = MacOSTitlebarStyle.transparent
              guard let config = self.config else { return defaultValue }
              var v: UnsafePointer<Int8>?
+diff --git a/macos/Sources/Ghostty/Ghostty.Surface.swift b/macos/Sources/Ghostty/Ghostty.Surface.swift
+index a076063..a795a32 100644
+--- a/macos/Sources/Ghostty/Ghostty.Surface.swift
++++ b/macos/Sources/Ghostty/Ghostty.Surface.swift
+@@ -1,3 +1,4 @@
++import Foundation
+ import GhosttyKit
+ 
+ extension Ghostty {
+@@ -141,6 +142,16 @@ extension Ghostty {
+         /// - Parameter event: The mouse position event to send to the terminal
+         @MainActor
+         func sendMousePos(_ event: Input.MousePosEvent) {
++            if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
++                let surface = self.surface
++                let x = event.x
++                let y = event.y
++                let mods = event.mods.cMods
++                Self.pimInputQueue.async {
++                    ghostty_surface_mouse_pos(surface, x, y, mods)
++                }
++                return
++            }
+             ghostty_surface_mouse_pos(
+                 surface,
+                 event.x,
+@@ -157,6 +168,16 @@ extension Ghostty {
+         /// - Parameter event: The mouse scroll event to send to the terminal
+         @MainActor
+         func sendMouseScroll(_ event: Input.MouseScrollEvent) {
++            if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
++                let surface = self.surface
++                let x = event.x
++                let y = event.y
++                let mods = event.mods.cScrollMods
++                Self.pimInputQueue.async {
++                    ghostty_surface_mouse_scroll(surface, x, y, mods)
++                }
++                return
++            }
+             ghostty_surface_mouse_scroll(
+                 surface,
+                 event.x,
+@@ -164,6 +185,8 @@ extension Ghostty {
+                 event.mods.cScrollMods)
+         }
+ 
++        private static let pimInputQueue = DispatchQueue(label: "com.pim.surface-input", qos: .userInteractive)
++
+         /// Perform a keybinding action.
+         ///
+         /// The action can be any valid keybind parameter. e.g. `keybind = goto_tab:4`
 diff --git a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift b/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
 index 0dbdeef..1de0596 100644
 --- a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift	
