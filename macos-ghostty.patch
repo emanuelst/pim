@@ -495,24 +495,23 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..bc17605 100644
+index 340a0b4..c03da6e 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
-@@ -58,6 +58,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -58,6 +58,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      /// The configuration derived from the Ghostty config so we don't need to rely on references.
      private(set) var derivedConfig: DerivedConfig
  
 +    private lazy var pimSessionStore = PimSessionStore()
 +    private var pimSurfaces: [URL: Ghostty.SurfaceView] = [:]
-+    private var retiringPimSurfaces: [ObjectIdentifier: Ghostty.SurfaceView] = [:]
-+    private var pimRetireTimer: Timer?
++    private var untrackedPimSurface: Ghostty.SurfaceView?
 +    private var currentPimSession: URL?
 +    private var pimSessionUpdates: AnyCancellable?
 +
      /// The notification cancellable for focused surface property changes.
      private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
  
-@@ -66,17 +73,24 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -66,17 +72,24 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
           withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
           parent: NSWindow? = nil
      ) {
@@ -539,7 +538,7 @@ index 340a0b4..bc17605 100644
  
          // Setup our notifications for behaviors
          let center = NotificationCenter.default
-@@ -190,7 +204,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -190,7 +203,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          _ newTree: SplitTree<Ghostty.SurfaceView>,
          moveFocusTo newView: Ghostty.SurfaceView? = nil,
          moveFocusFrom oldView: Ghostty.SurfaceView? = nil,
@@ -549,7 +548,7 @@ index 340a0b4..bc17605 100644
      ) {
          // We have a special case if our tree is empty to close our tab immediately.
          // This makes it so that undo is handled properly.
-@@ -203,7 +218,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -203,7 +217,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              newTree,
              moveFocusTo: newView,
              moveFocusFrom: oldView,
@@ -559,7 +558,7 @@ index 340a0b4..bc17605 100644
      }
  
      // MARK: Terminal Creation
-@@ -1051,6 +1067,115 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1066,95 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
  
@@ -568,7 +567,6 @@ index 340a0b4..bc17605 100644
 +        if currentSession == session.id { return }
 +
 +        retainCurrentPimSurfaceIfNeeded()
-+        retireCurrentPimSurfaceIfNeeded()
 +        if let cached = pimSurfaces[session.id], !cached.processExited {
 +            showPimSurface(cached, for: session)
 +            return
@@ -576,7 +574,6 @@ index 340a0b4..bc17605 100644
 +
 +        guard let ghosttyApp = ghostty.app else { return }
 +        let view = makePimSurface(session, app: ghosttyApp, background: false)
-+        if pimSessionStore.isKeptActive(session) { pimSurfaces[session.id] = view }
 +        showPimSurface(view, for: session)
 +    }
 +
@@ -589,6 +586,7 @@ index 340a0b4..bc17605 100644
 +    }
 +
 +    private func showPimSurface(_ view: Ghostty.SurfaceView, for session: PimSession) {
++        pimSurfaces[session.id] = view
 +        currentPimSession = session.id
 +        replaceSurfaceTree(
 +            .init(view: view),
@@ -597,32 +595,13 @@ index 340a0b4..bc17605 100644
 +            registerUndo: false)
 +    }
 +
-+    private func retireCurrentPimSurfaceIfNeeded() {
-+        guard let currentSession = currentPimSession ?? pimSessionStore.activeSession,
-+              !pimSessionStore.isKeptActivePath(currentSession),
-+              let oldSurface = focusedSurface else { return }
-+        let key = ObjectIdentifier(oldSurface)
-+        retiringPimSurfaces[key] = oldSurface
-+        if let surface = oldSurface.surface {
-+            ghostty.requestClose(surface: surface)
-+        }
-+        if pimRetireTimer == nil {
-+            pimRetireTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-+                guard let self else { return }
-+                self.retiringPimSurfaces = self.retiringPimSurfaces.filter { !$0.value.processExited }
-+                if self.retiringPimSurfaces.isEmpty {
-+                    self.pimRetireTimer?.invalidate()
-+                    self.pimRetireTimer = nil
-+                }
-+            }
-+        }
-+    }
-+
 +    private func retainCurrentPimSurfaceIfNeeded() {
-+        guard let currentSession = currentPimSession ?? pimSessionStore.activeSession,
-+              pimSessionStore.isKeptActivePath(currentSession),
-+              let focusedSurface else { return }
-+        pimSurfaces[currentSession] = focusedSurface
++        guard let focusedSurface else { return }
++        if let currentSession = currentPimSession ?? pimSessionStore.activeSession {
++            pimSurfaces[currentSession] = focusedSurface
++        } else {
++            untrackedPimSurface = focusedSurface
++        }
 +    }
 +
 +    private func togglePimActive(_ session: PimSession) {
@@ -661,8 +640,8 @@ index 340a0b4..bc17605 100644
 +            config.workingDirectory = path
 +            config.command = PimSessionStore.launchCommand()
 +            self.retainCurrentPimSurfaceIfNeeded()
-+            self.retireCurrentPimSurfaceIfNeeded()
 +            let view = Ghostty.SurfaceView(ghosttyApp, baseConfig: config)
++            self.untrackedPimSurface = view
 +            self.currentPimSession = nil
 +            self.replaceSurfaceTree(
 +                .init(view: view),
@@ -675,7 +654,7 @@ index 340a0b4..bc17605 100644
      // MARK: - NSWindowController
  
      override func windowWillLoad() {
-@@ -1085,7 +1210,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1085,7 +1189,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
  
          // Initialize our content view to the SwiftUI root
          let container = TerminalViewContainer {
@@ -694,7 +673,7 @@ index 340a0b4..bc17605 100644
          }
  
          // Set the initial content size on the container so that
-@@ -1095,6 +1230,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,6 +1209,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
  
          window.contentView = container
