@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..4e0b449
+index 0000000..8898cb0
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,896 @@
+@@ -0,0 +1,900 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -559,10 +559,12 @@ index 0000000..4e0b449
 +        preferredContentSize = NSSize(width: 36, height: 32)
 +
 +        button.translatesAutoresizingMaskIntoConstraints = false
-+        button.isBordered = true
-+        button.bezelStyle = .texturedRounded
++        button.setButtonType(.momentaryPushIn)
++        button.isBordered = false
++        button.bezelStyle = .shadowlessSquare
 +        button.focusRingType = .none
-+        button.showsBorderOnlyWhileMouseInside = true
++        button.showsBorderOnlyWhileMouseInside = false
++        button.contentTintColor = .secondaryLabelColor
 +        button.imageScaling = .scaleProportionallyDown
 +        button.target = self
 +        button.action = #selector(toggleSidebar)
@@ -585,7 +587,9 @@ index 0000000..4e0b449
 +    }
 +
 +    private func updateButton() {
-+        let symbol = visibility.isVisible ? "sidebar.left" : "sidebar.right"
++        // The control is an action, not a selected tab: keep the glyph stable
++        // and let the sidebar itself communicate the resulting state.
++        let symbol = "sidebar.left"
 +        let label = visibility.isVisible ? "Hide Sidebar" : "Show Sidebar"
 +        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
 +        button.toolTip = label
