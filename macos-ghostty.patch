@@ -700,7 +700,7 @@ index bfe42b1..1c8aca7 100644
              guard let config = self.config else { return defaultValue }
              var v: UnsafePointer<Int8>?
 diff --git a/macos/Sources/Ghostty/Ghostty.Surface.swift b/macos/Sources/Ghostty/Ghostty.Surface.swift
-index a076063..a860e47 100644
+index a076063..76a1680 100644
 --- a/macos/Sources/Ghostty/Ghostty.Surface.swift
 +++ b/macos/Sources/Ghostty/Ghostty.Surface.swift
 @@ -1,3 +1,4 @@
@@ -708,32 +708,16 @@ index a076063..a860e47 100644
  import GhosttyKit
  
  extension Ghostty {
-@@ -44,6 +45,29 @@ extension Ghostty {
+@@ -44,6 +45,13 @@ extension Ghostty {
              }
          }
  
-+        /// Queue a Pim session switch without blocking AppKit's main thread.
-+        ///
-+        /// The regular input APIs are main-actor isolated because they are used by
-+        /// AppKit event handling. Session switching is initiated by the sidebar and
-+        /// can contend with a busy agent, so keep the complete text+Enter pair on a
-+        /// serial input queue instead of holding up the sidebar click.
-+        nonisolated func sendPimResume(_ text: String) {
-+            let surface = self.surface
-+            Self.pimInputQueue.async {
-+                let length = text.utf8CString.count
-+                guard length > 1 else { return }
-+                text.withCString { ptr in
-+                    ghostty_surface_text(surface, ptr, UInt(length - 1))
-+                }
-+                let event = Input.KeyEvent(key: .enter)
-+                event.withCValue { cEvent in
-+                    ghostty_surface_key(surface, cEvent)
-+                }
-+            }
++        /// Submit a Pim session switch through the normal Ghostty input path.
++        @MainActor
++        func sendPimResume(_ text: String) {
++            sendText(text)
++            sendKeyEvent(.init(key: .enter))
 +        }
-+
-+        private static let pimInputQueue = DispatchQueue(label: "com.pim.session-input", qos: .userInitiated)
 +
          /// Send text to the terminal as if it was typed. This doesn't send the key events so keyboard
          /// shortcuts and other encodings do not take effect.
