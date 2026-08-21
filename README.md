@@ -1,6 +1,6 @@
 # pim
 
-A tiny tmux-backed session switcher for [pi](https://pi.dev).
+A tiny tmux-backed session switcher for [pi](https://github.com/earendil-works/pi).
 
 ## Install
 
