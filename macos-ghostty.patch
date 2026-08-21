@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..aaa648d
+index 0000000..4879cf5
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,672 @@
+@@ -0,0 +1,666 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -455,27 +455,21 @@ index 0000000..aaa648d
 +}
 +
 +private struct PimGlassBackground: NSViewRepresentable {
-+    let superGlass: Bool
-+
 +    func makeNSView(context: Context) -> NSVisualEffectView {
-+        NSVisualEffectView()
++        let view = NSVisualEffectView()
++        // Keep one stable frosted base in both modes. Super Glass adds
++        // Liquid Glass refraction on top instead of changing the window
++        // material, opacity, and background state underneath it.
++        view.material = .underWindowBackground
++        view.blendingMode = .behindWindow
++        view.state = .active
++        return view
 +    }
 +
 +    func updateNSView(_ view: NSVisualEffectView, context: Context) {
-+        if superGlass {
-+            // The easter egg deliberately uses the window-behind material.
-+            view.material = .underWindowBackground
-+            view.blendingMode = .behindWindow
-+        } else {
-+            // Normal mode is a single native sidebar material—no second
-+            // transparent layer and no stale window appearance state.
-+            view.material = .sidebar
-+            view.blendingMode = .withinWindow
-+        }
-+        view.state = .active
 +        guard let window = view.window else { return }
-+        window.isOpaque = !superGlass
-+        window.backgroundColor = superGlass ? .clear : .windowBackgroundColor
++        window.isOpaque = false
++        window.backgroundColor = .clear
 +        window.hasShadow = true
 +    }
 +}
@@ -548,9 +542,8 @@ index 0000000..aaa648d
 +        }
 +        .background {
 +            ZStack {
-+                PimGlassBackground(superGlass: superGlass)
-+                    .id(superGlass)
-+                    .opacity(superGlass ? 0.45 : 0.5)
++                PimGlassBackground()
++                    .opacity(0.75)
 +                    .ignoresSafeArea(.container, edges: .top)
 +                    .allowsHitTesting(false)
 +                if superGlass {
@@ -558,6 +551,7 @@ index 0000000..aaa648d
 +                    if #available(macOS 26.0, *) {
 +                        Color.clear
 +                            .glassEffect(.regular, in: Rectangle())
++                            .id("super-glass-refraction")
 +                            .opacity(0.9)
 +                            .ignoresSafeArea(.container, edges: .top)
 +                            .allowsHitTesting(false)
