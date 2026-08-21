@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000..564bc88
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1365 @@
+@@ -0,0 +1,1373 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -522,6 +522,14 @@ index 0000000..564bc88
 +    static func shellCommand() -> String {
 +        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
 +        return "\(quote(shell)) -l"
++    }
++
++    static func workspaceDirectory() -> String {
++        if let override = ProcessInfo.processInfo.environment["PIM_WORKSPACE_DIR"],
++           !override.isEmpty {
++            return URL(fileURLWithPath: override).standardized.path
++        }
++        return FileManager.default.homeDirectoryForCurrentUser.path
 +    }
 +
 +    static func resumeCommand(for session: PimSession) -> String {
@@ -1638,7 +1646,7 @@ index 340a0b4..aba8983 100644
 +    private func newPimChat() {
 +        guard let ghosttyApp = ghostty.app,
 +              let session = pimSessionStore.createNewSession(
-+                cwd: FileManager.default.homeDirectoryForCurrentUser.path) else { return }
++                cwd: PimSessionStore.workspaceDirectory()) else { return }
 +        pimSessionStore.markRead(session)
 +        var config = Ghostty.SurfaceConfiguration()
 +        config.workingDirectory = session.cwd

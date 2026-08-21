@@ -46,10 +46,12 @@ For a clean local screenshot environment without using your normal Pi sessions:
 ./macos/run-pim-clean.sh
 ```
 
-This points both Pim and Pi at a temporary empty agent directory and removes it
-when the app exits. It does not require a second macOS user or a virtual machine.
-Pim also accepts `PIM_AGENT_DIR` or Pi's `PI_CODING_AGENT_DIR` when you want to
-choose a persistent alternate agent directory yourself.
+This points both Pim and Pi at a temporary isolated agent directory, configures
+an offline `Pim Demo Model`, and uses a temporary `Pim Demo` workspace. The
+agent directory is removed when the app exits. It does not require a second
+macOS user or a virtual machine. Pim also accepts `PIM_AGENT_DIR`, Pi's
+`PI_CODING_AGENT_DIR`, and `PIM_WORKSPACE_DIR` when you want to choose alternate
+locations yourself.
 
 Pim currently starts without sandboxing because it needs to read Pi's local session directory and launch Pi processes.
 
