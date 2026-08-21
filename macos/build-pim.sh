@@ -59,6 +59,10 @@ rm -rf "$ICONSET" "$ROOT/build/Pim.icns"
 rm -rf "$ROOT/build/Pim.app/Contents/PlugIns/DockTilePlugin.plugin"
 rm -f "$ROOT/build/Pim.app/Contents/Resources/Ghostty.icns"
 /usr/libexec/PlistBuddy -c 'Delete :NSDockTilePlugIn' "$ROOT/build/Pim.app/Contents/Info.plist"
+# Give the copied app its own executable identity as well. This prevents the
+# Dock from falling back to Ghostty's icon when the Pim process exits.
+mv "$ROOT/build/Pim.app/Contents/MacOS/ghostty" "$ROOT/build/Pim.app/Contents/MacOS/Pim"
+/usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable Pim' "$ROOT/build/Pim.app/Contents/Info.plist"
 codesign --force --deep --sign - "$ROOT/build/Pim.app" >/dev/null
 # Refresh LaunchServices so the Dock picks up Pim.icns immediately, including
 # when the app is no longer running.
