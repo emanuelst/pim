@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..d95b5cc
+index 0000000..96d4ece
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1295 @@
+@@ -0,0 +1,1298 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -1146,6 +1146,9 @@ index 0000000..d95b5cc
 +                .help("New Chat")
 +            }
 +            .padding(.horizontal, 12)
++            // Leave room for the traffic lights when the Pim content extends
++            // into the transparent native titlebar.
++            .padding(.leading, 72)
 +            .padding(.vertical, 10)
 +
 +            List(selection: $selection) {
@@ -1661,7 +1664,7 @@ index b6e1c63..cd56c2d 100644
                      }
 
 diff --git a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
-index d907db9..f443ba8 100644
+index d907db9..dfc90ad 100644
 --- a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
 +++ b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
 @@ -51,14 +51,16 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
@@ -1708,16 +1711,20 @@ index d907db9..f443ba8 100644
              reapplyHiddenStyle()
          }
      }
-@@ -98,6 +100,9 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
-     // We override this so that with the hidden titlebar style the titlebar
+@@ -99,6 +101,13 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
      // area is not draggable.
      override var contentLayoutRect: CGRect {
-+        if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
-+            return super.contentLayoutRect
-+        }
          var rect = super.contentLayoutRect
++        if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
++            // Pim owns a single compact content toolbar. Let it extend under
++            // the transparent native titlebar instead of stacking below it.
++            rect.origin.y = 0
++            rect.size.height = self.frame.height
++            return rect
++        }
          rect.origin.y = 0
          rect.size.height = self.frame.height
+         return rect
 diff --git a/macos/Sources/Ghostty/Ghostty.Config.swift b/macos/Sources/Ghostty/Ghostty.Config.swift
 index bfe42b1..1c8aca7 100644
 --- a/macos/Sources/Ghostty/Ghostty.Config.swift
