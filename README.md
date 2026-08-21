@@ -1,43 +1,32 @@
-# pim
+# Pim
 
-A tiny tmux-backed session switcher for [pi](https://github.com/earendil-works/pi).
+Pim is a native macOS session multiplexer for [Pi](https://github.com/earendil-works/pi).
 
-## Install
+It gives Pi a calm, macOS-native home: a resizable sidebar for navigating chats and an embedded Ghostty terminal for the selected session.
 
-```sh
-ln -sf "$HOME/pim/pim.py" "$HOME/.local/bin/pim"
-```
+> Pim is experimental and currently intended as a local development build.
 
-Requires `pi` and `tmux` on `PATH`.
+## What Pim does
 
-## Run
+- Reads Pi's JSONL sessions directly; Pi remains the source of truth.
+- Embeds Pi inside a pinned Ghostty/libghostty macOS build.
+- Keeps visited sessions warm while allowing cold sessions to load on demand.
+- Shows warm, working, cold, and unread state in the sidebar.
+- Organizes sessions into **Pinned** and **Recents**.
+- Supports local custom chat names and pinning without modifying Pi session files.
+- Provides native chat search, including asynchronous transcript search.
+- Uses native macOS split views, titlebar controls, menus, materials, and keyboard behavior.
 
-```sh
-pim
-```
+Pim does not maintain a separate conversation database. Local presentation state—pins, names, and read markers—is stored in macOS `UserDefaults`.
 
-The left pane lists Pi sessions; the right pane is an unchanged Pi TUI.
+## Requirements
 
-- `↑` / `↓` or `j` / `k`: select a session
-- `Enter`: switch (stops and restarts the right pane)
-- `n`: start a new session
-- `r`: rename the selected session
-- `R`: refresh
-- `F6`: toggle focus between panes
-- click either pane to focus it
-- `q`: quit
+- macOS
+- Xcode and the macOS SDK
+- Zig
+- [Pi](https://github.com/earendil-works/pi) available on `PATH`, or configured with `PIM_PI_PATH`
 
-Sessions are never deleted. Switching directly stops and restarts the right Pi pane, so switch when the active turn is idle.
-
-Run the small check with:
-
-```sh
-python3 ~/pim/pim.py --self-test
-```
-
-## Native macOS test app
-
-The native build uses a pinned Ghostty checkout and its macOS terminal view:
+## Build and run the native app
 
 ```sh
 cd ~/pim
@@ -45,5 +34,33 @@ cd ~/pim
 ./macos/run-pim.sh
 ```
 
-The first build requires Xcode, Zig, and the Metal toolchain. The app is an
-unsigned local test build named `build/Pim.app`.
+The first build compiles the pinned Ghostty checkout and may take a while. The result is an unsigned local app at:
+
+```text
+build/Pim.app
+```
+
+Pim currently starts without sandboxing because it needs to read Pi's local session directory and launch Pi processes.
+
+## The original tmux prototype
+
+The tmux prototype remains available and is useful for testing the basic session model without building the native app:
+
+```sh
+ln -sf "$HOME/pim/pim.py" "$HOME/.local/bin/pim"
+pim
+```
+
+Run its self-test with:
+
+```sh
+python3 ~/pim/pim.py --self-test
+```
+
+The prototype requires `tmux` and Pi on `PATH`.
+
+## Data and privacy
+
+Pim reads sessions from Pi's local agent directory and does not upload conversation data. Be careful when sharing screenshots: terminal contents and session titles may contain private information.
+
+For a clean demo environment, a separate macOS user account is preferable to a virtual machine. It provides a real native macOS window without exposing your personal `~/.pi` data. A future demo fixture mode can populate that account with synthetic Pi session JSONL files and a stub Pi executable.
