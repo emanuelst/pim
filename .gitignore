@@ -4,3 +4,5 @@ vendor/
 build/
 macos/build/
 *.profraw
+
+.tmp/

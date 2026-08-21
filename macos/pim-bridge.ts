@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-const statusPath = path.join(os.homedir(), ".pi", "agent", `pim-status-${process.pid}.json`);
+const agentDir = process.env.PIM_AGENT_DIR ?? process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".pi", "agent");
+const statusPath = path.join(agentDir, `pim-status-${process.pid}.json`);
 const role = process.env.PIM_BACKGROUND === "1" ? "background" : "foreground";
 
 function publish(session: string | undefined, state: "idle" | "working" | "stopped"): void {

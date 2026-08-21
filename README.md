@@ -40,6 +40,17 @@ The first build compiles the pinned Ghostty checkout and may take a while. The r
 build/Pim.app
 ```
 
+For a clean local screenshot environment without using your normal Pi sessions:
+
+```sh
+./macos/run-pim-clean.sh
+```
+
+This points both Pim and Pi at a temporary empty agent directory and removes it
+when the app exits. It does not require a second macOS user or a virtual machine.
+Pim also accepts `PIM_AGENT_DIR` or Pi's `PI_CODING_AGENT_DIR` when you want to
+choose a persistent alternate agent directory yourself.
+
 Pim currently starts without sandboxing because it needs to read Pi's local session directory and launch Pi processes.
 
 ## The original tmux prototype
