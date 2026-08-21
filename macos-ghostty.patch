@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..b027e13
+index 0000000..c586890
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,893 @@
+@@ -0,0 +1,897 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -555,14 +555,18 @@ index 0000000..b027e13
 +    }
 +
 +    override func loadView() {
-+        let container = NSView()
-+        container.translatesAutoresizingMaskIntoConstraints = false
-+        container.widthAnchor.constraint(equalToConstant: 34).isActive = true
-+        container.heightAnchor.constraint(equalToConstant: 28).isActive = true
++        let container = NSView(frame: NSRect(x: 0, y: 0, width: 48, height: 44))
++        preferredContentSize = NSSize(width: 48, height: 44)
 +
 +        button.translatesAutoresizingMaskIntoConstraints = false
 +        button.isBordered = false
-+        button.bezelStyle = .texturedRounded
++        button.bezelStyle = .regularSquare
++        button.wantsLayer = true
++        button.layer?.backgroundColor = NSColor(calibratedWhite: 0.18, alpha: 0.88).cgColor
++        button.layer?.cornerRadius = 18
++        button.layer?.borderWidth = 1
++        button.layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
++        button.contentTintColor = .white
 +        button.imageScaling = .scaleProportionallyDown
 +        button.target = self
 +        button.action = #selector(toggleSidebar)
@@ -572,8 +576,8 @@ index 0000000..b027e13
 +        NSLayoutConstraint.activate([
 +            button.centerXAnchor.constraint(equalTo: container.centerXAnchor),
 +            button.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-+            button.widthAnchor.constraint(equalToConstant: 24),
-+            button.heightAnchor.constraint(equalToConstant: 24),
++            button.widthAnchor.constraint(equalToConstant: 36),
++            button.heightAnchor.constraint(equalToConstant: 36),
 +        ])
 +        view = container
 +        updateButton()
@@ -921,7 +925,7 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..cf5a62c 100644
+index 340a0b4..07d504e 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -57,6 +57,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
@@ -1105,20 +1109,7 @@ index 340a0b4..cf5a62c 100644
      // MARK: - NSWindowController
 
      override func windowWillLoad() {
-@@ -1068,6 +1183,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
-         // use whatever the latest app-level config is.
-         let config = ghostty.config
-
-+        if pimSidebarAccessory == nil {
-+            let accessory = PimSidebarAccessoryViewController(visibility: pimSidebarVisibility)
-+            window.addTitlebarAccessoryViewController(accessory)
-+            pimSidebarAccessory = accessory
-+        }
-+
-         // Setting all three of these is required for restoration to work.
-         window.isRestorable = restorable
-         if restorable {
-@@ -1085,7 +1206,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1085,7 +1200,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
          // Initialize our content view to the SwiftUI root
          let container = TerminalViewContainer {
@@ -1138,11 +1129,16 @@ index 340a0b4..cf5a62c 100644
          }
 
          // Set the initial content size on the container so that
-@@ -1095,7 +1227,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1221,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
 
          window.contentView = container
 -
++        if pimSidebarAccessory == nil {
++            let accessory = PimSidebarAccessoryViewController(visibility: pimSidebarVisibility)
++            window.addTitlebarAccessoryViewController(accessory)
++            pimSidebarAccessory = accessory
++        }
 +        DispatchQueue.main.async { [weak self] in
 +            guard let self, self.pimForegroundSurface == nil,
 +                  let surface = self.focusedSurface,
