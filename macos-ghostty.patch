@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..9e12db8
+index 0000000..9fc9162
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,161 @@
+@@ -0,0 +1,201 @@
 +import Foundation
 +import SwiftUI
 +
@@ -15,7 +15,12 @@ index 0000000..9e12db8
 +    let modified: Date
 +
 +    var displayName: String {
-+        name ?? title ?? "Untitled session"
++        name ?? title ?? "New chat"
++    }
++
++    var projectName: String {
++        let name = URL(fileURLWithPath: cwd).lastPathComponent
++        return name.isEmpty ? cwd : name
 +    }
 +}
 +
@@ -23,6 +28,8 @@ index 0000000..9e12db8
 +final class PimSessionStore: ObservableObject {
 +    @Published private(set) var sessions: [PimSession] = []
 +    private var timer: Timer?
++    private var cache: [URL: (Date, PimSession)] = [:]
++    private var refreshInFlight = false
 +
 +    init() {
 +        refresh()
@@ -36,22 +43,47 @@ index 0000000..9e12db8
 +    }
 +
 +    func refresh() {
-+        sessions = Self.loadSessions()
++        guard !refreshInFlight else { return }
++        refreshInFlight = true
++        let oldCache = cache
++        DispatchQueue.global(qos: .utility).async { [weak self] in
++            let (sessions, cache) = Self.loadSessions(cached: oldCache)
++            Task { @MainActor [weak self] in
++                guard let self else { return }
++                self.cache = cache
++                self.sessions = sessions
++                self.refreshInFlight = false
++            }
++        }
 +    }
 +
-+    static func loadSessions() -> [PimSession] {
++    nonisolated static func loadSessions() -> [PimSession] {
++        loadSessions(cached: [:]).0
++    }
++
++    private nonisolated static func loadSessions(cached: [URL: (Date, PimSession)]) -> ([PimSession], [URL: (Date, PimSession)]) {
++        var sessions: [PimSession] = []
++        var nextCache: [URL: (Date, PimSession)] = [:]
 +        let root = FileManager.default.homeDirectoryForCurrentUser
 +            .appendingPathComponent(".pi/agent/sessions")
 +        guard let enumerator = FileManager.default.enumerator(
 +            at: root,
 +            includingPropertiesForKeys: [.contentModificationDateKey],
 +            options: [.skipsHiddenFiles]
-+        ) else { return [] }
++        ) else { return ([], [:]) }
 +
-+        return enumerator.compactMap { item -> PimSession? in
-+            guard let url = item as? URL, url.pathExtension == "jsonl" else { return nil }
-+            return read(url)
-+        }.sorted { $0.modified > $1.modified }
++        for case let url as URL in enumerator where url.pathExtension == "jsonl" {
++            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
++                ?? Date.distantPast
++            if let cached = cached[url], cached.0 == modified {
++                sessions.append(cached.1)
++                nextCache[url] = cached
++            } else if let session = read(url, modified: modified) {
++                sessions.append(session)
++                nextCache[url] = (modified, session)
++            }
++        }
++        return (sessions.sorted { $0.modified > $1.modified }, nextCache)
 +    }
 +
 +    static func initialConfiguration() -> Ghostty.SurfaceConfiguration {
@@ -89,7 +121,7 @@ index 0000000..9e12db8
 +        return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) ?? "pi"
 +    }
 +
-+    private static func read(_ url: URL) -> PimSession? {
++    private nonisolated static func read(_ url: URL, modified: Date) -> PimSession? {
 +        guard let data = try? Data(contentsOf: url) else { return nil }
 +        var cwd: String?
 +        var name: String?
@@ -112,8 +144,6 @@ index 0000000..9e12db8
 +        }
 +
 +        guard let cwd else { return nil }
-+        let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
-+            ?? Date.distantPast
 +        return PimSession(id: url, cwd: cwd, name: name, title: title, modified: modified)
 +    }
 +
@@ -144,15 +174,16 @@ index 0000000..9e12db8
 +            .padding(.vertical, 10)
 +
 +            List(store.sessions, selection: $selection) { session in
-+                VStack(alignment: .leading, spacing: 3) {
++                VStack(alignment: .leading, spacing: 1) {
 +                    Text(session.displayName)
++                        .font(.system(size: 13))
 +                        .lineLimit(1)
-+                    Text(session.cwd)
-+                        .font(.caption)
++                    Text("\(ageLabel(session.modified)) · \(session.projectName)")
++                        .font(.system(size: 11))
 +                        .foregroundStyle(.secondary)
 +                        .lineLimit(1)
 +                }
-+                .padding(.vertical, 3)
++                .padding(.vertical, 1)
 +                .tag(session.id)
 +            }
 +            .listStyle(.sidebar)
@@ -162,7 +193,16 @@ index 0000000..9e12db8
 +                onOpen(session)
 +            }
 +        }
-+        .frame(minWidth: 230, idealWidth: 280, maxWidth: 340)
++        .frame(minWidth: 230, idealWidth: 260, maxWidth: 320)
++    }
++
++    private func ageLabel(_ date: Date) -> String {
++        let seconds = max(0, Date().timeIntervalSince(date))
++        if seconds < 60 { return "now" }
++        if seconds < 3600 { return "\(Int(seconds / 60))m ago" }
++        if seconds < 86400 { return "\(Int(seconds / 3600))h ago" }
++        if seconds < 604800 { return "\(Int(seconds / 86400))d ago" }
++        return date.formatted(.dateTime.month(.abbreviated).day())
 +    }
 +}
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
