@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..a4213f1
+index 0000000..1a8bf45
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,467 @@
+@@ -0,0 +1,498 @@
 +import Foundation
 +import SwiftUI
 +
@@ -54,6 +54,7 @@ index 0000000..a4213f1
 +    @Published private(set) var activeSession: URL?
 +    @Published private(set) var activeStates: [URL: String] = [:]
 +    @Published private(set) var activeRoles: [URL: String] = [:]
++    @Published private(set) var switchingTo: URL?
 +    @Published private var readAt: [String: TimeInterval]
 +    @Published private var keptActivePaths: Set<String>
 +    private var timer: Timer?
@@ -61,6 +62,7 @@ index 0000000..a4213f1
 +    private static let activeStateKey = "Pim.keptActive"
 +    private var cache: [URL: (Date, PimSession)] = [:]
 +    private var refreshInFlight = false
++    private var requestedActiveSession: URL?
 +
 +    init() {
 +        readAt = UserDefaults.standard.dictionary(forKey: Self.readStateKey) as? [String: TimeInterval] ?? [:]
@@ -127,7 +129,26 @@ index 0000000..a4213f1
 +    private func applyStatus(_ status: PimStatusSnapshot) {
 +        if activeStates != status.states { activeStates = status.states }
 +        if activeRoles != status.roles { activeRoles = status.roles }
-+        if activeSession != status.foregroundSession { activeSession = status.foregroundSession }
++        if requestedActiveSession == status.foregroundSession {
++            requestedActiveSession = nil
++            switchingTo = nil
++        }
++        let visibleSession = requestedActiveSession ?? status.foregroundSession
++        if activeSession != visibleSession { activeSession = visibleSession }
++    }
++
++    func requestActiveSession(_ session: URL) {
++        requestedActiveSession = session
++        switchingTo = session
++        activeSession = session
++        let request = session
++        Task { @MainActor [weak self] in
++            try? await Task.sleep(nanoseconds: 15_000_000_000)
++            guard let self, self.requestedActiveSession == request else { return }
++            self.requestedActiveSession = nil
++            self.switchingTo = nil
++            self.activeSession = nil
++        }
 +    }
 +
 +    private nonisolated static func loadStatus() -> PimStatusSnapshot {
@@ -192,14 +213,12 @@ index 0000000..a4213f1
 +    static func initialConfiguration() -> Ghostty.SurfaceConfiguration {
 +        var config = Ghostty.SurfaceConfiguration()
 +        let cwd = FileManager.default.currentDirectoryPath
-+        let session = loadSessions().first(where: { $0.cwd == cwd })
-+        initialSessionID = session?.id
++        // Do not scan and parse the entire session tree while Ghostty is
++        // constructing the first terminal. The sidebar refreshes it off-main
++        // and will resume the matching session once the metadata is ready.
++        initialSessionID = nil
 +        config.workingDirectory = cwd
-+        config.command = if let session {
-+            launchCommand(for: session)
-+        } else {
-+            launchCommand()
-+        }
++        config.command = launchCommand()
 +        return config
 +    }
 +
@@ -209,6 +228,11 @@ index 0000000..a4213f1
 +
 +    static func launchCommand() -> String {
 +        piCommand()
++    }
++
++    static func resumeCommand(for session: PimSession) -> String {
++        let encodedPath = Data(session.id.path.utf8).base64EncodedString()
++        return "/pim-resume \(encodedPath)\r"
 +    }
 +
 +    private static func piCommand() -> String {
@@ -337,6 +361,13 @@ index 0000000..a4213f1
 +            HStack {
 +                Text("Chats")
 +                    .font(.headline)
++                if store.switchingTo != nil {
++                    ProgressView()
++                        .controlSize(.small)
++                    Text("Loading chat…")
++                        .font(.caption)
++                        .foregroundStyle(.secondary)
++                }
 +                Spacer()
 +                if let selection,
 +                   let session = store.sessions.first(where: { $0.id == selection }) {
@@ -487,7 +518,7 @@ index 7948810..367cbfe 100644
          let oldTree = surfaceTree
 @@ -553,7 +554,7 @@ class BaseTerminalController: NSWindowController,
          }
- 
+
          // Setup our undo
 -        guard let undoManager else { return }
 +        guard registerUndo, let undoManager else { return }
@@ -495,23 +526,28 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..3fe3706 100644
+index 340a0b4..20342f4 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
-@@ -58,6 +58,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -58,6 +58,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      /// The configuration derived from the Ghostty config so we don't need to rely on references.
      private(set) var derivedConfig: DerivedConfig
- 
+
 +    private lazy var pimSessionStore = PimSessionStore()
 +    private var pimSurfaces: [URL: Ghostty.SurfaceView] = [:]
 +    private var untrackedPimSurface: Ghostty.SurfaceView?
++    private var pimForegroundSurface: Ghostty.SurfaceView?
++    private var pimForegroundSession: URL?
++    private var pimPendingSession: PimSession?
++    private var pimSwitchWorkItem: DispatchWorkItem?
++    private var pimBackgroundStartInFlight = false
 +    private var currentPimSession: URL?
 +    private var pimSessionUpdates: AnyCancellable?
 +
      /// The notification cancellable for focused surface property changes.
      private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
- 
-@@ -66,17 +72,24 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+
+@@ -66,17 +77,27 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
           withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
           parent: NSWindow? = nil
      ) {
@@ -525,20 +561,23 @@ index 340a0b4..3fe3706 100644
          // restoration.
 -        self.restorable = (base?.command ?? "") == ""
 +        self.restorable = (pimBase.command ?? "") == ""
- 
+
          // Setup our initial derived config based on the current app config
          self.derivedConfig = DerivedConfig(ghostty.config)
 +        self.currentPimSession = initialPimSession
- 
+
 -        super.init(ghostty, baseConfig: base, surfaceTree: tree)
 +        super.init(ghostty, baseConfig: pimBase, surfaceTree: tree)
 +        pimSessionUpdates = pimSessionStore.$sessions.dropFirst().sink { [weak self] _ in
-+            DispatchQueue.main.async { self?.startKeptPimSessions() }
++            DispatchQueue.main.async {
++                self?.scheduleInitialPimResume()
++                self?.startKeptPimSessions()
++            }
 +        }
- 
+
          // Setup our notifications for behaviors
          let center = NotificationCenter.default
-@@ -190,7 +203,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -190,7 +211,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          _ newTree: SplitTree<Ghostty.SurfaceView>,
          moveFocusTo newView: Ghostty.SurfaceView? = nil,
          moveFocusFrom oldView: Ghostty.SurfaceView? = nil,
@@ -548,7 +587,7 @@ index 340a0b4..3fe3706 100644
      ) {
          // We have a special case if our tree is empty to close our tab immediately.
          // This makes it so that undo is handled properly.
-@@ -203,7 +217,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -203,7 +225,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              newTree,
              moveFocusTo: newView,
              moveFocusFrom: oldView,
@@ -556,25 +595,76 @@ index 340a0b4..3fe3706 100644
 +            undoAction: undoAction,
 +            registerUndo: registerUndo)
      }
- 
+
      // MARK: Terminal Creation
-@@ -1051,6 +1066,86 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1074,164 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
- 
+
 +    private func openPimSession(_ session: PimSession) {
-+        let currentSession = currentPimSession ?? pimSessionStore.activeSession
-+        if currentSession == session.id { return }
-+
-+        retainCurrentPimSurfaceIfNeeded()
++        // Explicitly kept-active sessions have their own process and surface.
++        // Normal history navigation reuses the one foreground Pi process so a
++        // click never has to construct a new AppKit/Metal surface.
 +        if let cached = pimSurfaces[session.id], !cached.processExited {
 +            showPimSurface(cached, for: session)
 +            return
 +        }
++        requestPimSession(session)
++    }
 +
-+        guard let ghosttyApp = ghostty.app else { return }
-+        let view = makePimSurface(session, app: ghosttyApp, background: false)
-+        showPimSurface(view, for: session)
++    private func capturePimForegroundSurfaceIfNeeded() {
++        guard pimForegroundSurface == nil,
++              let surface = focusedSurface,
++              !surface.processExited else { return }
++        pimForegroundSurface = surface
++        pimForegroundSession = currentPimSession
++    }
++
++    private func foregroundPimSurface() -> Ghostty.SurfaceView? {
++        capturePimForegroundSurfaceIfNeeded()
++        guard let surface = pimForegroundSurface, !surface.processExited else { return nil }
++        return surface
++    }
++
++    private func scheduleInitialPimResume() {
++        let cwd = FileManager.default.currentDirectoryPath
++        guard currentPimSession == nil,
++              pimForegroundSession == nil,
++              let session = pimSessionStore.sessions.first(where: { $0.cwd == cwd }) else { return }
++        requestPimSession(session)
++    }
++
++    private func requestPimSession(_ session: PimSession) {
++        pimPendingSession = session
++        pimSwitchWorkItem?.cancel()
++        let workItem = DispatchWorkItem { [weak self] in
++            self?.drainPimSwitch()
++        }
++        pimSwitchWorkItem = workItem
++        // Coalesce a burst of clicks before sending anything into the TUI.
++        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: workItem)
++    }
++
++    private func drainPimSwitch() {
++        guard let session = pimPendingSession,
++              let surface = foregroundPimSurface() else { return }
++
++        // Do not type a slash command into a running Pi turn. Keep the UI
++        // responsive and retry when the foreground process settles.
++        if let active = pimSessionStore.activeSession,
++           pimSessionStore.activeStates[active] == "working" {
++            let retry = DispatchWorkItem { [weak self] in self?.drainPimSwitch() }
++            pimSwitchWorkItem = retry
++            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: retry)
++            return
++        }
++
++        pimPendingSession = nil
++        pimForegroundSession = session.id
++        pimSessionStore.requestActiveSession(session.id)
++        let command = PimSessionStore.resumeCommand(for: session)
++        surface.surfaceModel?.sendPimResume(command)
++        showPimSurface(surface, for: session)
 +    }
 +
 +    private func makePimSurface(_ session: PimSession, app: ghostty_app_t, background: Bool) -> Ghostty.SurfaceView {
@@ -586,7 +676,9 @@ index 340a0b4..3fe3706 100644
 +    }
 +
 +    private func showPimSurface(_ view: Ghostty.SurfaceView, for session: PimSession) {
-+        pimSurfaces[session.id] = view
++        pimForegroundSurface = view
++        pimForegroundSession = session.id
++        pimSessionStore.requestActiveSession(session.id)
 +        currentPimSession = session.id
 +        replaceSurfaceTree(
 +            .init(view: view),
@@ -597,6 +689,12 @@ index 340a0b4..3fe3706 100644
 +
 +    private func retainCurrentPimSurfaceIfNeeded() {
 +        guard let focusedSurface else { return }
++        if let pimForegroundSurface, focusedSurface === pimForegroundSurface {
++            if let currentSession = currentPimSession ?? pimSessionStore.activeSession {
++                pimSurfaces[currentSession] = focusedSurface
++            }
++            return
++        }
 +        if let currentSession = currentPimSession ?? pimSessionStore.activeSession {
 +            pimSurfaces[currentSession] = focusedSurface
 +        } else {
@@ -617,12 +715,27 @@ index 340a0b4..3fe3706 100644
 +    }
 +
 +    private func startKeptPimSessions() {
-+        guard let ghosttyApp = ghostty.app else { return }
++        guard !pimBackgroundStartInFlight,
++              let ghosttyApp = ghostty.app else { return }
 +        let visible = pimSessionStore.activeSession
 +        if currentPimSession == nil { currentPimSession = visible }
-+        for session in pimSessionStore.sessions where pimSessionStore.isKeptActive(session)
-+            && session.id != visible && pimSurfaces[session.id] == nil {
-+            pimSurfaces[session.id] = makePimSurface(session, app: ghosttyApp, background: true)
++        guard let session = pimSessionStore.sessions.first(where: {
++            pimSessionStore.isKeptActive($0)
++                && $0.id != visible
++                && pimSurfaces[$0.id] == nil
++        }) else { return }
++
++        pimBackgroundStartInFlight = true
++        // Never create a burst of hidden AppKit/Metal surfaces in one loop.
++        DispatchQueue.main.async { [weak self] in
++            guard let self else { return }
++            if self.pimSurfaces[session.id] == nil {
++                self.pimSurfaces[session.id] = self.makePimSurface(session, app: ghosttyApp, background: true)
++            }
++            self.pimBackgroundStartInFlight = false
++            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
++                self?.startKeptPimSessions()
++            }
 +        }
 +    }
 +
@@ -634,6 +747,10 @@ index 340a0b4..3fe3706 100644
 +        retainCurrentPimSurfaceIfNeeded()
 +        let view = Ghostty.SurfaceView(ghosttyApp, baseConfig: config)
 +        untrackedPimSurface = view
++        pimForegroundSurface = view
++        pimForegroundSession = nil
++        pimPendingSession = nil
++        pimSwitchWorkItem?.cancel()
 +        currentPimSession = nil
 +        replaceSurfaceTree(
 +            .init(view: view),
@@ -643,10 +760,10 @@ index 340a0b4..3fe3706 100644
 +    }
 +
      // MARK: - NSWindowController
- 
+
      override func windowWillLoad() {
-@@ -1085,7 +1180,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
- 
+@@ -1085,7 +1266,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+
          // Initialize our content view to the SwiftUI root
          let container = TerminalViewContainer {
 -            TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
@@ -662,16 +779,20 @@ index 340a0b4..3fe3706 100644
 +                TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
 +            }
          }
- 
+
          // Set the initial content size on the container so that
-@@ -1095,6 +1200,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,6 +1286,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
- 
+
          window.contentView = container
++        DispatchQueue.main.async { [weak self] in
++            self?.capturePimForegroundSurfaceIfNeeded()
++            self?.scheduleInitialPimResume()
++        }
 +        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
 +            self?.startKeptPimSessions()
 +        }
- 
+
          // If we have a default size, we want to apply it.
          if let defaultSize {
 diff --git a/macos/Sources/Features/Terminal/TerminalView.swift b/macos/Sources/Features/Terminal/TerminalView.swift
@@ -687,15 +808,15 @@ index b6e1c63..cd56c2d 100644
 +                       Bundle.main.bundleURL.lastPathComponent != "Pim.app" {
                          DebugBuildWarningView()
                      }
- 
+
 diff --git a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
 index d907db9..1816e80 100644
---- a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift	
-+++ b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift	
+--- a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
++++ b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
 @@ -55,10 +55,13 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
          titleVisibility = .hidden
          titlebarAppearsTransparent = true
- 
+
 -        // Hide the traffic lights (window control buttons)
 -        standardWindowButton(.closeButton)?.isHidden = true
 -        standardWindowButton(.miniaturizeButton)?.isHidden = true
@@ -707,7 +828,7 @@ index d907db9..1816e80 100644
 +            standardWindowButton(.miniaturizeButton)?.isHidden = true
 +            standardWindowButton(.zoomButton)?.isHidden = true
 +        }
- 
+
          // Disallow tabbing if the titlebar is hidden, since that will (should) also hide the tab bar.
          tabbingMode = .disallowed
 @@ -66,7 +69,8 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
@@ -736,7 +857,7 @@ index bfe42b1..1c8aca7 100644
 +++ b/macos/Sources/Ghostty/Ghostty.Config.swift
 @@ -349,6 +349,9 @@ extension Ghostty {
          }
- 
+
          var macosTitlebarStyle: MacOSTitlebarStyle {
 +            if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
 +                return .hidden
@@ -745,15 +866,34 @@ index bfe42b1..1c8aca7 100644
              guard let config = self.config else { return defaultValue }
              var v: UnsafePointer<Int8>?
 diff --git a/macos/Sources/Ghostty/Ghostty.Surface.swift b/macos/Sources/Ghostty/Ghostty.Surface.swift
-index a076063..a795a32 100644
+index a076063..7a5a6d3 100644
 --- a/macos/Sources/Ghostty/Ghostty.Surface.swift
 +++ b/macos/Sources/Ghostty/Ghostty.Surface.swift
 @@ -1,3 +1,4 @@
 +import Foundation
  import GhosttyKit
- 
+
  extension Ghostty {
-@@ -141,6 +142,16 @@ extension Ghostty {
+@@ -44,6 +45,18 @@ extension Ghostty {
+             }
+         }
+
++        /// Submit a Pim session switch without blocking AppKit on libghostty input.
++        nonisolated func sendPimResume(_ text: String) {
++            let surface = self.surface
++            Self.pimInputQueue.async {
++                let length = text.utf8CString.count
++                guard length > 1 else { return }
++                text.withCString { ptr in
++                    ghostty_surface_text(surface, ptr, UInt(length - 1))
++                }
++            }
++        }
++
+         /// Send text to the terminal as if it was typed. This doesn't send the key events so keyboard
+         /// shortcuts and other encodings do not take effect.
+         @MainActor
+@@ -141,6 +154,16 @@ extension Ghostty {
          /// - Parameter event: The mouse position event to send to the terminal
          @MainActor
          func sendMousePos(_ event: Input.MousePosEvent) {
@@ -770,7 +910,7 @@ index a076063..a795a32 100644
              ghostty_surface_mouse_pos(
                  surface,
                  event.x,
-@@ -157,6 +168,16 @@ extension Ghostty {
+@@ -157,6 +180,16 @@ extension Ghostty {
          /// - Parameter event: The mouse scroll event to send to the terminal
          @MainActor
          func sendMouseScroll(_ event: Input.MouseScrollEvent) {
@@ -787,10 +927,10 @@ index a076063..a795a32 100644
              ghostty_surface_mouse_scroll(
                  surface,
                  event.x,
-@@ -164,6 +185,8 @@ extension Ghostty {
+@@ -164,6 +197,8 @@ extension Ghostty {
                  event.mods.cScrollMods)
          }
- 
+
 +        private static let pimInputQueue = DispatchQueue(label: "com.pim.surface-input", qos: .userInteractive)
 +
          /// Perform a keybinding action.
@@ -798,19 +938,19 @@ index a076063..a795a32 100644
          /// The action can be any valid keybind parameter. e.g. `keybind = goto_tab:4`
 diff --git a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift b/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
 index 0dbdeef..1de0596 100644
---- a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift	
-+++ b/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift	
+--- a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
++++ b/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
 @@ -977,6 +977,7 @@ extension Ghostty {
          }
- 
+
          override func mouseEntered(with event: NSEvent) {
 +            guard !mouseOverSurface else { return }
              mouseOverSurface = true
              super.mouseEntered(with: event)
- 
+
 @@ -998,6 +999,7 @@ extension Ghostty {
          }
- 
+
          override func mouseExited(with event: NSEvent) {
 +            guard mouseOverSurface else { return }
              mouseOverSurface = false
