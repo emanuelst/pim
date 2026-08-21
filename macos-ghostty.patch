@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..1b875da
+index 0000000..6370626
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1101 @@
+@@ -0,0 +1,1122 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -383,8 +383,6 @@ index 0000000..1b875da
 +                self.requestedActiveSession = nil
 +                switchingTo = nil
 +            }
-+        } else if activeSession == nil {
-+            activeSession = status.foregroundSession
 +        }
 +    }
 +
@@ -479,7 +477,9 @@ index 0000000..1b875da
 +        // and will resume the matching session once the metadata is ready.
 +        initialSessionID = nil
 +        config.workingDirectory = cwd
-+        config.command = launchCommand()
++        // Start with an inert shell behind Pim's native empty state. Pim
++        // should open in a choose-a-chat mode, not create/select a Pi session.
++        config.command = shellCommand()
 +        return config
 +    }
 +
@@ -856,6 +856,24 @@ index 0000000..1b875da
 +    }
 +}
 +
++struct PimEmptyState: View {
++    var body: some View {
++        VStack(spacing: 10) {
++            Image(systemName: "bubble.left.and.bubble.right")
++                .font(.system(size: 28, weight: .medium))
++                .foregroundStyle(.secondary)
++            Text("Select a chat")
++                .font(.headline)
++            Text("Choose a conversation from the sidebar to open it.")
++                .font(.subheadline)
++                .foregroundStyle(.secondary)
++        }
++        .frame(maxWidth: .infinity, maxHeight: .infinity)
++        .background(.clear)
++        .contentShape(Rectangle())
++    }
++}
++
 +struct PimLoadingOverlay: View {
 +    @ObservedObject var store: PimSessionStore
 +
@@ -904,6 +922,9 @@ index 0000000..1b875da
 +            VStack(spacing: 0) {
 +                ZStack {
 +                    TerminalView(ghostty: ghostty, viewModel: viewModel, delegate: delegate)
++                    if store.activeSession == nil && store.switchingTo == nil {
++                        PimEmptyState()
++                    }
 +                    PimLoadingOverlay(store: store)
 +                }
 +            }
