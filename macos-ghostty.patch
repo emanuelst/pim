@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..61c167c
+index 0000000..785cb23
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,677 @@
+@@ -0,0 +1,687 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -561,9 +561,10 @@ index 0000000..61c167c
 +#if compiler(>=6.2)
 +                    if #available(macOS 26.0, *) {
 +                        Color.clear
-+                            .glassEffect(.regular, in: Rectangle())
++                            // Clear is the transparent Liquid Glass variant:
++                            // it adds refraction without adding a second gray fill.
++                            .glassEffect(.clear, in: Rectangle())
 +                            .id("super-glass-refraction")
-+                            .opacity(0.9)
 +                            .ignoresSafeArea(.container, edges: .top)
 +                            .allowsHitTesting(false)
 +                    }
@@ -605,10 +606,19 @@ index 0000000..61c167c
 +                    .font(.system(size: 11))
 +                    .foregroundStyle(.secondary)
 +                if let state = store.activeStates[session.id] {
-+                    Circle()
-+                        .fill(state == "working" ? Color.orange : Color.green)
-+                        .frame(width: 6, height: 6)
-+                        .accessibilityLabel(state == "working" ? "Working" : "Warm and idle")
++                    if state == "working" {
++                        ProgressView()
++                            .progressViewStyle(.circular)
++                            .controlSize(.mini)
++                            .tint(.orange)
++                            .frame(width: 8, height: 8)
++                            .accessibilityLabel("Working")
++                    } else {
++                        Circle()
++                            .fill(Color.green)
++                            .frame(width: 6, height: 6)
++                            .accessibilityLabel("Warm and idle")
++                    }
 +                } else {
 +                    Circle()
 +                        .stroke(Color.secondary.opacity(0.55), lineWidth: 1)
