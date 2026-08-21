@@ -1,11 +1,17 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..cc2cb36
+index 0000000..1f9096d
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,443 @@
+@@ -0,0 +1,456 @@
 +import Foundation
 +import SwiftUI
++
++private struct PimStatusSnapshot: Sendable {
++    let states: [URL: String]
++    let roles: [URL: String]
++    let foregroundSession: URL?
++}
 +
 +struct PimSession: Identifiable, Hashable {
 +    let id: URL
@@ -105,19 +111,26 @@ index 0000000..cc2cb36
 +        let oldCache = cache
 +        DispatchQueue.global(qos: .utility).async { [weak self] in
 +            let (sessions, cache) = Self.loadSessions(cached: oldCache)
++            let status = Self.loadStatus()
 +            Task { @MainActor [weak self] in
 +                guard let self else { return }
 +                self.cache = cache
 +                if self.sessions != sessions {
 +                    self.sessions = sessions
 +                }
-+                self.refreshStatus()
++                self.applyStatus(status)
 +                self.refreshInFlight = false
 +            }
 +        }
 +    }
 +
-+    private func refreshStatus() {
++    private func applyStatus(_ status: PimStatusSnapshot) {
++        if activeStates != status.states { activeStates = status.states }
++        if activeRoles != status.roles { activeRoles = status.roles }
++        if activeSession != status.foregroundSession { activeSession = status.foregroundSession }
++    }
++
++    private nonisolated static func loadStatus() -> PimStatusSnapshot {
 +        let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".pi/agent")
 +        var states: [URL: String] = [:]
 +        var roles: [URL: String] = [:]
@@ -138,10 +151,10 @@ index 0000000..cc2cb36
 +                }
 +            }
 +        }
-+        if activeStates != states { activeStates = states }
-+        if activeRoles != roles { activeRoles = roles }
-+        let nextActiveSession = newestForeground?.0
-+        if activeSession != nextActiveSession { activeSession = nextActiveSession }
++        return PimStatusSnapshot(
++            states: states,
++            roles: roles,
++            foregroundSession: newestForeground?.0)
 +    }
 +
 +    nonisolated static func loadSessions() -> [PimSession] {
