@@ -29,10 +29,10 @@ index ace9205..2ef2591 100644
      func hide() {
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..99adb20
+index 0000000..fecbb1c
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1433 @@
+@@ -0,0 +1,1440 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -61,6 +61,11 @@ index 0000000..99adb20
 +                         "Ghostty Help": item.isHidden = true
 +                    default: break
 +                    }
++                    // AppKit may create or localize the terminate item after the
++                    // menu nib has loaded, so identify it by its action too.
++                    if item.action == #selector(NSApplication.terminate(_:)) {
++                        item.title = "Quit Pim"
++                    }
 +                    if let submenu = item.submenu { update(submenu) }
 +                }
 +            }
@@ -68,7 +73,9 @@ index 0000000..99adb20
 +        }
 +
 +        apply()
-+        DispatchQueue.main.async { apply() }
++        for delay in [0.05, 0.25, 1.0] {
++            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { apply() }
++        }
 +    }
 +}
 +
@@ -1490,7 +1497,7 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..5295e7e 100644
+index 340a0b4..e9ba982 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -6,6 +6,10 @@ import GhosttyKit
