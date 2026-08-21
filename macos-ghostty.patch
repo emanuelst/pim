@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..c1ad52a
+index 0000000..c9c177b
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,607 @@
+@@ -0,0 +1,609 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -117,7 +117,9 @@ index 0000000..c1ad52a
 +        let now = Date()
 +        let id = UUID().uuidString.lowercased()
 +        let timestamp = ISO8601DateFormatter().string(from: now)
-+        let directory = "-\(cwd.replacingOccurrences(of: "/", with: "-"))-"
++        let resolvedCwd = URL(fileURLWithPath: cwd).standardized.path
++        let encodedCwd = resolvedCwd.hasPrefix("/") ? String(resolvedCwd.dropFirst()) : resolvedCwd
++        let directory = "--\(encodedCwd.replacingOccurrences(of: "/", with: "-"))--"
 +        let root = FileManager.default.homeDirectoryForCurrentUser
 +            .appendingPathComponent(".pi/agent/sessions")
 +            .appendingPathComponent(directory, isDirectory: true)
@@ -134,7 +136,7 @@ index 0000000..c1ad52a
 +              let line = String(data: data, encoding: .utf8) else { return nil }
 +        do {
 +            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-+            try (line + "\\n").write(to: file, atomically: true, encoding: .utf8)
++            try (line + "\n").write(to: file, atomically: true, encoding: .utf8)
 +        } catch {
 +            return nil
 +        }
