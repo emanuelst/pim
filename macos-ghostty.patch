@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..b79a6ed
+index 0000000..c3b3784
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1299 @@
+@@ -0,0 +1,1302 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -873,13 +873,14 @@ index 0000000..b79a6ed
 +        .frame(maxWidth: .infinity, maxHeight: .infinity)
 +        // Fully cover the inert bootstrap terminal. Its login banner must
 +        // never leak through the choose-a-chat state.
-+        .background(appearance.backgroundColor)
++        .background(appearance.backgroundColor.opacity(appearance.backgroundOpacity))
 +        .contentShape(Rectangle())
 +    }
 +}
 +
 +struct PimLoadingOverlay: View {
 +    @ObservedObject var store: PimSessionStore
++    @ObservedObject var appearance: PimTerminalAppearance
 +
 +    var body: some View {
 +        if let loadingID = store.switchingTo {
@@ -898,7 +899,9 @@ index 0000000..b79a6ed
 +                    .foregroundStyle(.secondary)
 +            }
 +            .frame(maxWidth: .infinity, maxHeight: .infinity)
-+            .background(.regularMaterial)
++            .foregroundStyle(appearance.usesLightForeground ? Color.black : Color.white)
++            // Loading is part of the terminal surface, not a floating panel.
++            .background(appearance.backgroundColor.opacity(appearance.backgroundOpacity))
 +            .transition(.opacity)
 +            .animation(.easeOut(duration: 0.15), value: store.switchingTo)
 +        }
@@ -1092,7 +1095,7 @@ index 0000000..b79a6ed
 +                        if store.activeSession == nil && store.switchingTo == nil {
 +                            PimEmptyState(appearance: appearance)
 +                        }
-+                        PimLoadingOverlay(store: store)
++                        PimLoadingOverlay(store: store, appearance: appearance)
 +                    }
 +                }
 +            }
@@ -1761,18 +1764,91 @@ index bfe42b1..1c8aca7 100644
              guard let config = self.config else { return defaultValue }
              var v: UnsafePointer<Int8>?
 diff --git a/macos/Sources/Ghostty/Ghostty.Surface.swift b/macos/Sources/Ghostty/Ghostty.Surface.swift
-index a076063..93153f7 100644
+index a076063..dc453d9 100644
 --- a/macos/Sources/Ghostty/Ghostty.Surface.swift
 +++ b/macos/Sources/Ghostty/Ghostty.Surface.swift
-@@ -1,3 +1,4 @@
+@@ -1,5 +1,55 @@
 +import Foundation
  import GhosttyKit
 
++private final class PimSurfaceResizeScheduler: @unchecked Sendable {
++    private struct Request {
++        let surface: ghostty_surface_t
++        let width: UInt32
++        let height: UInt32
++        let completion: (ghostty_surface_size_s) -> Void
++    }
++
++    private let lock = NSLock()
++    private let queue = DispatchQueue(label: "com.pim.surface-resize", qos: .userInteractive)
++    private var pending: Request?
++    private var draining = false
++
++    func submit(
++        surface: ghostty_surface_t,
++        width: UInt32,
++        height: UInt32,
++        completion: @escaping (ghostty_surface_size_s) -> Void
++    ) {
++        lock.lock()
++        pending = Request(surface: surface, width: width, height: height, completion: completion)
++        let shouldStart = !draining
++        draining = true
++        lock.unlock()
++        if shouldStart {
++            queue.async { [self] in drain() }
++        }
++    }
++
++    private func drain() {
++        while true {
++            lock.lock()
++            guard let request = pending else {
++                draining = false
++                lock.unlock()
++                return
++            }
++            pending = nil
++            lock.unlock()
++
++            ghostty_surface_set_size(request.surface, request.width, request.height)
++            let size = ghostty_surface_size(request.surface)
++            DispatchQueue.main.async {
++                request.completion(size)
++            }
++        }
++    }
++}
++
  extension Ghostty {
-@@ -44,6 +45,42 @@ extension Ghostty {
+     /// Represents a single surface within Ghostty.
+     ///
+@@ -13,6 +63,7 @@ extension Ghostty {
+         /// A surface is sendable because it is just a reference type. Using the surface in parameters
+         /// may be unsafe but the value itself is safe to send across threads.
+         nonisolated(unsafe) private let surface: ghostty_surface_t
++        private let pimResizeScheduler = PimSurfaceResizeScheduler()
+
+         /// Read the underlying C value for this surface. This is unsafe because the value will be
+         /// freed when the Surface class is deinitialized.
+@@ -44,6 +95,56 @@ extension Ghostty {
              }
          }
 
++        /// Submit a Pim surface resize without blocking AppKit on libghostty.
++        /// Only the newest pending size is retained while a resize is in flight.
++        nonisolated func sendPimSurfaceSize(
++            width: UInt32,
++            height: UInt32,
++            completion: @escaping (ghostty_surface_size_s) -> Void
++        ) {
++            pimResizeScheduler.submit(
++                surface: surface,
++                width: width,
++                height: height,
++                completion: completion)
++        }
++
 +        /// Submit a Pim session switch without blocking AppKit on libghostty input.
 +        nonisolated func sendPimResume(_ text: String) {
 +            let surface = self.surface
@@ -1812,7 +1888,7 @@ index a076063..93153f7 100644
          /// Send text to the terminal as if it was typed. This doesn't send the key events so keyboard
          /// shortcuts and other encodings do not take effect.
          @MainActor
-@@ -141,6 +178,16 @@ extension Ghostty {
+@@ -141,6 +242,16 @@ extension Ghostty {
          /// - Parameter event: The mouse position event to send to the terminal
          @MainActor
          func sendMousePos(_ event: Input.MousePosEvent) {
@@ -1829,7 +1905,7 @@ index a076063..93153f7 100644
              ghostty_surface_mouse_pos(
                  surface,
                  event.x,
-@@ -157,6 +204,16 @@ extension Ghostty {
+@@ -157,6 +268,16 @@ extension Ghostty {
          /// - Parameter event: The mouse scroll event to send to the terminal
          @MainActor
          func sendMouseScroll(_ event: Input.MouseScrollEvent) {
@@ -1846,7 +1922,7 @@ index a076063..93153f7 100644
              ghostty_surface_mouse_scroll(
                  surface,
                  event.x,
-@@ -164,6 +221,8 @@ extension Ghostty {
+@@ -164,6 +285,8 @@ extension Ghostty {
                  event.mods.cScrollMods)
          }
 
@@ -1856,7 +1932,7 @@ index a076063..93153f7 100644
          ///
          /// The action can be any valid keybind parameter. e.g. `keybind = goto_tab:4`
 diff --git a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift b/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
-index 0dbdeef..8f9ec73 100644
+index 0dbdeef..289acb7 100644
 --- a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
 +++ b/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
 @@ -454,8 +454,13 @@ extension Ghostty {
@@ -1875,7 +1951,31 @@ index 0dbdeef..8f9ec73 100644
 
              // Update our secure input state if we are a password input
              if passwordInput {
-@@ -901,8 +906,13 @@ extension Ghostty {
+@@ -491,12 +496,19 @@ extension Ghostty {
+         }
+
+         private func setSurfaceSize(width: UInt32, height: UInt32) {
+-            guard let surface = self.surface else { return }
++            if Bundle.main.bundleURL.lastPathComponent == "Pim.app",
++               let surfaceModel {
++                // Pi can be rendering a large tool result while AppKit is
++                // resizing the window. Keep the main thread free and retain
++                // only the newest pending framebuffer size.
++                surfaceModel.sendPimSurfaceSize(width: width, height: height) { [weak self] size in
++                    self?.surfaceSize = size
++                }
++                return
++            }
+
+-            // Update our core surface
++            guard let surface = self.surface else { return }
+             ghostty_surface_set_size(surface, width, height)
+-
+-            // Update our cached size metrics
+             let size = ghostty_surface_size(surface)
+             DispatchQueue.main.async {
+                 // DispatchQueue required since this may be called by SwiftUI off
+@@ -901,8 +913,13 @@ extension Ghostty {
          }
 
          override func mouseDown(with event: NSEvent) {
@@ -1890,7 +1990,7 @@ index 0dbdeef..8f9ec73 100644
              ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, mods)
          }
 
-@@ -918,8 +928,17 @@ extension Ghostty {
+@@ -918,8 +935,17 @@ extension Ghostty {
              prevPressureStage = 0
 
              // If we have an active surface, report the event
@@ -1909,7 +2009,7 @@ index 0dbdeef..8f9ec73 100644
              ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, mods)
 
              // Release pressure
-@@ -977,6 +996,7 @@ extension Ghostty {
+@@ -977,6 +1003,7 @@ extension Ghostty {
          }
 
          override func mouseEntered(with event: NSEvent) {
@@ -1917,7 +2017,7 @@ index 0dbdeef..8f9ec73 100644
              mouseOverSurface = true
              super.mouseEntered(with: event)
 
-@@ -998,6 +1018,7 @@ extension Ghostty {
+@@ -998,6 +1025,7 @@ extension Ghostty {
          }
 
          override func mouseExited(with event: NSEvent) {
