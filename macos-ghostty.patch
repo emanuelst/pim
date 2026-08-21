@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..ec88187
+index 0000000..1b875da
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,908 @@
+@@ -0,0 +1,1101 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -31,6 +31,15 @@ index 0000000..ec88187
 +    let states: [URL: String]
 +    let roles: [URL: String]
 +    let foregroundSession: URL?
++}
++
++struct PimSearchResult: Identifiable, Hashable {
++    let id: URL
++    let title: String
++    let project: String
++    let snippet: String
++    let modified: Date
++    let transcriptMatch: Bool
 +}
 +
 +struct PimSession: Identifiable, Hashable {
@@ -74,6 +83,8 @@ index 0000000..ec88187
 +    @Published private(set) var activeSession: URL?
 +    @Published private(set) var activeStates: [URL: String] = [:]
 +    @Published private(set) var switchingTo: URL?
++    @Published private(set) var searchResults: [PimSearchResult] = []
++    @Published private(set) var isSearching = false
 +    @Published private var readAt: [String: TimeInterval]
 +    @Published private var pinnedPaths: Set<String>
 +    @Published private(set) var customNames: [String: String]
@@ -89,6 +100,7 @@ index 0000000..ec88187
 +    private var statusRefreshInFlight = false
 +    private var requestedActiveSession: URL?
 +    private var loadingReadyAt = Date.distantPast
++    private var searchGeneration = 0
 +
 +    init() {
 +        PimIcon.install()
@@ -148,6 +160,134 @@ index 0000000..ec88187
 +            customNames[session.id.path] = trimmed
 +        }
 +        UserDefaults.standard.set(customNames, forKey: Self.customNamesKey)
++    }
++
++    func clearSearch() {
++        searchGeneration += 1
++        searchResults = []
++        isSearching = false
++    }
++
++    func search(_ rawQuery: String) {
++        searchGeneration += 1
++        let generation = searchGeneration
++        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
++        guard query.count >= 2 else {
++            searchResults = []
++            isSearching = false
++            return
++        }
++
++        let sessions = sessions
++        let names = customNames
++        let metadataResults = Self.metadataSearch(query: query, sessions: sessions, names: names)
++        searchResults = metadataResults
++        isSearching = true
++
++        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
++            let transcriptMatches = Self.searchTranscript(query: query)
++            Task { @MainActor [weak self] in
++                guard let self, self.searchGeneration == generation else { return }
++                let byID = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
++                var results = metadataResults
++                let existing = Set(results.map(\.id))
++                for (id, snippet) in transcriptMatches {
++                    guard let session = byID[id], !existing.contains(id) else {
++                        if let index = results.firstIndex(where: { $0.id == id }) {
++                            results[index] = PimSearchResult(
++                                id: id,
++                                title: names[id.path] ?? byID[id]!.displayName,
++                                project: byID[id]!.projectName,
++                                snippet: snippet,
++                                modified: byID[id]!.modified,
++                                transcriptMatch: true)
++                        }
++                        continue
++                    }
++                    results.append(PimSearchResult(
++                        id: id,
++                        title: names[id.path] ?? session.displayName,
++                        project: session.projectName,
++                        snippet: snippet,
++                        modified: session.modified,
++                        transcriptMatch: true))
++                }
++                results.sort { $0.modified > $1.modified }
++                self.searchResults = results
++                self.isSearching = false
++            }
++        }
++    }
++
++    private nonisolated static func metadataSearch(
++        query: String,
++        sessions: [PimSession],
++        names: [String: String]
++    ) -> [PimSearchResult] {
++        sessions.compactMap { session in
++            let title = names[session.id.path] ?? session.displayName
++            let fields = [title, session.title ?? "", session.projectName, session.cwd, session.model ?? "", session.provider ?? ""]
++            guard fields.contains(where: { $0.localizedCaseInsensitiveContains(query) }) else { return nil }
++            return PimSearchResult(
++                id: session.id,
++                title: title,
++                project: session.projectName,
++                snippet: "Chat title or metadata",
++                modified: session.modified,
++                transcriptMatch: false)
++        }
++    }
++
++    private nonisolated static func searchTranscript(query: String) -> [URL: String] {
++        let root = FileManager.default.homeDirectoryForCurrentUser
++            .appendingPathComponent(".pi/agent/sessions")
++        var matches: [URL: String] = [:]
++        guard let enumerator = FileManager.default.enumerator(
++            at: root,
++            includingPropertiesForKeys: nil,
++            options: [.skipsHiddenFiles]
++        ) else { return matches }
++
++        for case let url as URL in enumerator where url.pathExtension == "jsonl" {
++            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
++                  let contents = String(data: data, encoding: .utf8) else { continue }
++            for line in contents.split(whereSeparator: { $0.isNewline }) {
++                let raw = String(line)
++                guard raw.localizedCaseInsensitiveContains(query),
++                      let object = try? JSONSerialization.jsonObject(with: Data(raw.utf8)),
++                      let entry = object as? [String: Any],
++                      entry["type"] as? String == "message",
++                      let text = messageText(from: entry),
++                      text.localizedCaseInsensitiveContains(query) else { continue }
++                matches[url] = makeSnippet(text, query: query)
++                break
++            }
++        }
++        return matches
++    }
++
++    private nonisolated static func messageText(from value: Any) -> String? {
++        if let string = value as? String { return string }
++        if let array = value as? [Any] {
++            let text = array.compactMap { messageText(from: $0) }.joined(separator: " ")
++            return text.isEmpty ? nil : text
++        }
++        guard let dictionary = value as? [String: Any] else { return nil }
++        if let message = dictionary["message"] { return messageText(from: message) }
++        if let content = dictionary["content"] { return messageText(from: content) }
++        if let text = dictionary["text"] { return messageText(from: text) }
++        return nil
++    }
++
++    private nonisolated static func makeSnippet(_ text: String, query: String) -> String {
++        guard let range = text.range(of: query, options: .caseInsensitive) else {
++            return String(text.prefix(140))
++        }
++        let start = text.index(range.lowerBound, offsetBy: -70, limitedBy: text.startIndex) ?? text.startIndex
++        let end = text.index(range.upperBound, offsetBy: 70, limitedBy: text.endIndex) ?? text.endIndex
++        let prefix = start == text.startIndex ? "" : "…"
++        let suffix = end == text.endIndex ? "" : "…"
++        return prefix + text[start..<end] + suffix
 +    }
 +
 +    func createNewSession(cwd: String) -> PimSession? {
@@ -545,6 +685,59 @@ index 0000000..ec88187
 +@MainActor
 +final class PimSidebarVisibility: ObservableObject {
 +    @Published var isVisible = true
++}
++
++@MainActor
++final class PimSearchState: ObservableObject {
++    @Published var isPresented = false
++}
++
++@MainActor
++final class PimSearchAccessoryViewController: NSTitlebarAccessoryViewController {
++    private let state: PimSearchState
++    private let button = NSButton()
++
++    init(state: PimSearchState) {
++        self.state = state
++        super.init(nibName: nil, bundle: nil)
++        layoutAttribute = .left
++    }
++
++    @available(*, unavailable)
++    required init?(coder: NSCoder) {
++        fatalError("init(coder:) has not been implemented")
++    }
++
++    override func loadView() {
++        let container = NSView(frame: NSRect(x: 0, y: 0, width: 32, height: 32))
++        preferredContentSize = NSSize(width: 32, height: 32)
++        button.translatesAutoresizingMaskIntoConstraints = false
++        button.setButtonType(.momentaryPushIn)
++        button.isBordered = false
++        button.bezelStyle = .shadowlessSquare
++        button.focusRingType = .none
++        button.contentTintColor = .secondaryLabelColor
++        button.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Search")
++        button.imageScaling = .scaleProportionallyDown
++        button.toolTip = "Search Chats and Transcripts"
++        button.setAccessibilityLabel("Search Chats and Transcripts")
++        button.target = self
++        button.action = #selector(openSearch)
++        button.keyEquivalent = "f"
++        button.keyEquivalentModifierMask = [.command]
++        container.addSubview(button)
++        NSLayoutConstraint.activate([
++            button.centerXAnchor.constraint(equalTo: container.centerXAnchor),
++            button.centerYAnchor.constraint(equalTo: container.centerYAnchor),
++            button.widthAnchor.constraint(equalToConstant: 24),
++            button.heightAnchor.constraint(equalToConstant: 24),
++        ])
++        view = container
++    }
++
++    @objc private func openSearch() {
++        state.isPresented = true
++    }
 +}
 +
 +@MainActor
