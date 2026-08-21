@@ -1251,7 +1251,7 @@ index b6e1c63..cd56c2d 100644
                      }
 
 diff --git a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
-index d907db9..d46a5b4 100644
+index d907db9..ef133df 100644
 --- a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
 +++ b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
 @@ -51,14 +51,18 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
@@ -1289,7 +1289,18 @@ index d907db9..d46a5b4 100644
             let titleBarContainer = themeFrame.firstDescendant(withClassName: "NSTitlebarContainerView") {
              titleBarContainer.isHidden = true
          }
-@@ -98,6 +103,9 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
+@@ -88,9 +93,7 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
+
+     override var title: String {
+         didSet {
+-            // Updating the title text as above automatically reveals the
+-            // native title view in macOS 15.0 and above. Since we're using
+-            // a custom view instead, we need to re-hide it.
++            // Reapply the native titlebar policy after the title changes.
+             reapplyHiddenStyle()
+         }
+     }
+@@ -98,6 +101,9 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
      // We override this so that with the hidden titlebar style the titlebar
      // area is not draggable.
      override var contentLayoutRect: CGRect {
