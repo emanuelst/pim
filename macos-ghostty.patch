@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..c3b3784
+index 0000000..73b4a1e
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1302 @@
+@@ -0,0 +1,1304 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -1152,7 +1152,9 @@ index 0000000..c3b3784
 +            .padding(.horizontal, 12)
 +            // Leave room for the traffic lights when the Pim content extends
 +            // into the transparent native titlebar.
-+            .padding(.leading, 72)
++            // Keep the sidebar heading clear of the traffic lights, sidebar
++            // toggle, and search control in the native titlebar.
++            .padding(.leading, 112)
 +            .padding(.vertical, 10)
 +
 +            List(selection: $selection) {
