@@ -267,14 +267,24 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
             curses.curs_set(0)
         except curses.error:
             pass
+        def refresh_items(items: list[Session], selected: int) -> tuple[list[Session], int]:
+            selected_file = items[selected].file if items and selected < len(items) else None
+            fresh = load()
+            if not fresh:
+                return fresh, 0
+            if selected_file:
+                selected = next((i for i, item in enumerate(fresh) if item.file == selected_file), min(selected, len(fresh) - 1))
+            else:
+                selected = min(selected, len(fresh) - 1)
+            return fresh, selected
+
         stdscr.keypad(True)
         stdscr.timeout(250)
-        items = load()
+        items, selected = refresh_items([], selected)
         next_refresh = time.monotonic() + 2
         while True:
             if time.monotonic() >= next_refresh:
-                items = load()
-                selected = min(selected, max(0, len(items) - 1))
+                items, selected = refresh_items(items, selected)
                 next_refresh = time.monotonic() + 2
                 draw(stdscr, items, selected, active, status, start_cwd)
 
@@ -290,18 +300,18 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
                 selected = (selected + 1) % len(items)
             elif key in (10, 13, curses.KEY_ENTER) and items:
                 active, status = switch(items[selected])
-                items = load()
+                items, selected = refresh_items(items, selected)
                 next_refresh = time.monotonic() + 2
             elif key == ord("n"):
                 active, status = new_session(stdscr)
-                items = load()
+                items, selected = refresh_items(items, selected)
                 next_refresh = time.monotonic() + 2
             elif key == ord("r") and items:
                 status = rename_session(stdscr, items[selected])
-                items = load()
+                items, selected = refresh_items(items, selected)
                 next_refresh = time.monotonic() + 2
             elif key in (ord("R"), curses.KEY_F5):
-                items = load()
+                items, selected = refresh_items(items, selected)
                 next_refresh = time.monotonic() + 2
                 status = "Session list refreshed"
             draw(stdscr, items, selected, active, status, start_cwd)
