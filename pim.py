@@ -160,10 +160,9 @@ def draw(
     active: Path | None,
     status: str,
     current_cwd: str,
-) -> dict[int, int]:
+) -> None:
     stdscr.erase()
     height, width = stdscr.getmaxyx()
-    row_map: dict[int, int] = {}
     rows = flatten(items, current_cwd)
     selected = max(0, min(selected, max(0, len(items) - 1)))
 
@@ -171,7 +170,7 @@ def draw(
         stdscr.addnstr(0, 0, " PIM  sessions", width - 1, curses.A_BOLD)
         stdscr.addnstr(1, 0, " n new   r rename   Enter switch   F6 focus   q quit", width - 1, curses.A_DIM)
     except curses.error:
-        return row_map
+        return
 
     selected_path = items[selected].file if items else None
     visible = max(1, height - 4)
@@ -180,7 +179,6 @@ def draw(
         selected_row = next((i for i, (_, value) in enumerate(rows) if value == items[selected]), 0)
         first = max(0, min(selected_row - visible // 2, max(0, len(rows) - visible)))
 
-    session_index = 0
     for screen_row, row_index in enumerate(range(first, min(len(rows), first + visible)), start=2):
         kind, value = rows[row_index]
         if kind == "heading":
@@ -192,7 +190,6 @@ def draw(
 
         item = value
         assert isinstance(item, Session)
-        row_map[screen_row] = session_index
         marker = ">" if item.file == selected_path else " "
         active_marker = " *" if active and item.file == active else "  "
         suffix = f" {age_label(item.updated)}"
@@ -207,14 +204,11 @@ def draw(
             stdscr.addnstr(screen_row, 0, text, available, attr)
         except curses.error:
             pass
-        session_index += 1
-
     try:
         stdscr.addnstr(height - 1, 0, " " + status, width - 1, curses.A_DIM)
     except curses.error:
         pass
     stdscr.refresh()
-    return row_map
 
 
 def append_session_name(path: Path, name: str) -> None:
@@ -274,15 +268,13 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
             pass
         stdscr.keypad(True)
         stdscr.timeout(1000)
-        curses.mousemask(curses.ALL_MOUSE_EVENTS)
-
         while True:
             items = load()
             if items:
                 selected = min(selected, len(items) - 1)
             else:
                 selected = 0
-            row_map = draw(stdscr, items, selected, active, status, start_cwd)
+            draw(stdscr, items, selected, active, status, start_cwd)
             key = stdscr.getch()
 
             if key == -1:
@@ -302,16 +294,6 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
                 status = rename_session(stdscr, items[selected])
             elif key in (ord("R"), curses.KEY_F5):
                 status = "Session list refreshed"
-            elif key == curses.KEY_MOUSE:
-                try:
-                    _, _, y, _, buttons = curses.getmouse()
-                    if buttons & (curses.BUTTON1_CLICKED | curses.BUTTON1_PRESSED):
-                        index = row_map.get(y)
-                        if index is not None:
-                            selected = index
-                            status = f"Selected {items[selected].label}; press Enter to switch"
-                except curses.error:
-                    pass
 
     curses.wrapper(loop)
 
