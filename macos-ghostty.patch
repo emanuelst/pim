@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..bb9ea8b
+index 0000000..aa1269b
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,304 @@
+@@ -0,0 +1,367 @@
 +import Foundation
 +import SwiftUI
 +
@@ -15,6 +15,9 @@ index 0000000..bb9ea8b
 +    let provider: String?
 +    let model: String?
 +    let thinkingLevel: String?
++    let totalCost: Double
++    let contextTokens: Int
++    let contextWindow: Int
 +    let modified: Date
 +
 +    var displayName: String {
@@ -26,10 +29,20 @@ index 0000000..bb9ea8b
 +        return name.isEmpty ? cwd : name
 +    }
 +
-+    var modelLabel: String? {
-+        let label = [provider, model].compactMap { $0 }.joined(separator: " / ")
-+        guard !label.isEmpty else { return nil }
-+        return thinkingLevel == nil || thinkingLevel == "off" ? label : "\(label) · \(thinkingLevel!)"
++    var nativeStatusLabel: String? {
++        guard let model else { return nil }
++        let provider = provider.map { "(\($0)) " } ?? ""
++        let level = thinkingLevel == nil || thinkingLevel == "off" ? "thinking off" : thinkingLevel!
++        let percent = contextWindow == 0 ? "0.0" : String(format: "%.1f", Double(contextTokens) / Double(contextWindow) * 100)
++        return "$\(String(format: "%.3f", totalCost))\(self.provider == "openai-codex" ? " (sub)" : "") \(percent)%/\(formatTokens(contextWindow)) (auto)    \(provider)\(model) • \(level)"
++    }
++
++    private func formatTokens(_ count: Int) -> String {
++        if count < 1000 { return "\(count)" }
++        if count < 10000 { return String(format: "%.1fk", Double(count) / 1000) }
++        if count < 1_000_000 { return "\(Int(round(Double(count) / 1000)))k" }
++        if count < 10_000_000 { return String(format: "%.1fM", Double(count) / 1_000_000) }
++        return "\(Int(round(Double(count) / 1_000_000)))M"
 +    }
 +}
 +
@@ -69,6 +82,12 @@ index 0000000..bb9ea8b
 +        UserDefaults.standard.set(readAt, forKey: Self.readStateKey)
 +    }
 +
++    func markAllRead() {
++        let timestamp = Date().timeIntervalSince1970
++        for session in sessions { readAt[session.id.path] = timestamp }
++        UserDefaults.standard.set(readAt, forKey: Self.readStateKey)
++    }
++
 +    func refresh() {
 +        guard !refreshInFlight else { return }
 +        refreshInFlight = true
@@ -93,6 +112,7 @@ index 0000000..bb9ea8b
 +        var nextCache: [URL: (Date, PimSession)] = [:]
 +        let root = FileManager.default.homeDirectoryForCurrentUser
 +            .appendingPathComponent(".pi/agent/sessions")
++        let contextWindows = modelContextWindows()
 +        guard let enumerator = FileManager.default.enumerator(
 +            at: root,
 +            includingPropertiesForKeys: [.contentModificationDateKey],
@@ -105,7 +125,7 @@ index 0000000..bb9ea8b
 +            if let cached = cached[url], cached.0 == modified {
 +                sessions.append(cached.1)
 +                nextCache[url] = cached
-+            } else if let session = read(url, modified: modified) {
++            } else if let session = read(url, modified: modified, contextWindows: contextWindows) {
 +                sessions.append(session)
 +                nextCache[url] = (modified, session)
 +            }
@@ -148,7 +168,7 @@ index 0000000..bb9ea8b
 +        return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) ?? "pi"
 +    }
 +
-+    private nonisolated static func read(_ url: URL, modified: Date) -> PimSession? {
++    private nonisolated static func read(_ url: URL, modified: Date, contextWindows: [String: Int]) -> PimSession? {
 +        guard let data = try? Data(contentsOf: url) else { return nil }
 +        var cwd: String?
 +        var name: String?
@@ -158,6 +178,8 @@ index 0000000..bb9ea8b
 +        var thinkingLevel: String?
 +        var usedProvider: String?
 +        var usedModel: String?
++        var totalCost = 0.0
++        var contextTokens = 0
 +
 +        for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
 +            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
@@ -176,6 +198,16 @@ index 0000000..bb9ea8b
 +                if message["role"] as? String == "assistant" {
 +                    usedProvider = message["provider"] as? String ?? usedProvider
 +                    usedModel = message["model"] as? String ?? usedModel
++                    if let usage = message["usage"] as? [String: Any] {
++                        let number: (Any?) -> Double = { ($0 as? NSNumber)?.doubleValue ?? 0 }
++                        if let cost = usage["cost"] as? [String: Any] {
++                            totalCost += number(cost["total"])
++                        }
++                        if object["stopReason"] as? String != "aborted" {
++                            contextTokens = ["input", "output", "cacheRead", "cacheWrite"]
++                                .reduce(0) { $0 + Int(number(usage[$1])) }
++                        }
++                    }
 +                }
 +                guard title == nil, message["role"] as? String == "user" else { continue }
 +                let text = if let text = message["content"] as? String {
@@ -200,7 +232,27 @@ index 0000000..bb9ea8b
 +            provider: usedProvider ?? provider,
 +            model: usedModel ?? model,
 +            thinkingLevel: thinkingLevel,
++            totalCost: totalCost,
++            contextTokens: contextTokens,
++            contextWindow: contextWindows["\(usedProvider ?? provider ?? "")/\(usedModel ?? model ?? "")"] ?? 0,
 +            modified: modified)
++    }
++
++    private nonisolated static func modelContextWindows() -> [String: Int] {
++        let url = FileManager.default.homeDirectoryForCurrentUser
++            .appendingPathComponent(".pi/agent/models-store.json")
++        guard let data = try? Data(contentsOf: url),
++              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
++        var result: [String: Int] = [:]
++        for (provider, value) in root {
++            guard let models = value as? [[String: Any]] else { continue }
++            for model in models {
++                guard let id = model["id"] as? String,
++                      let contextWindow = (model["contextWindow"] as? NSNumber)?.intValue else { continue }
++                result["\(provider)/\(id)"] = contextWindow
++            }
++        }
++        return result
 +    }
 +
 +    private static func quote(_ value: String) -> String {
@@ -222,6 +274,13 @@ index 0000000..bb9ea8b
 +                Text("Chats")
 +                    .font(.headline)
 +                Spacer()
++                Menu {
++                    Button("Mark All as Read", action: store.markAllRead)
++                } label: {
++                    Image(systemName: "ellipsis.circle")
++                }
++                .menuStyle(.borderlessButton)
++                .help("Chat options")
 +                Button(action: onNew) {
 +                    Image(systemName: "plus")
 +                }
@@ -233,29 +292,33 @@ index 0000000..bb9ea8b
 +
 +            List(selection: $selection) {
 +                ForEach(store.sessions, id: \.id) { (session: PimSession) in
-+                    HStack(spacing: 6) {
 +                    VStack(alignment: .leading, spacing: 1) {
-+                        Text(session.displayName)
-+                            .font(.system(size: 13, weight: store.isUnread(session) ? .semibold : .regular))
-+                            .lineLimit(1)
-+                        Text("\(ageLabel(session.modified)) · \(session.projectName)")
++                        HStack(spacing: 5) {
++                            Text(session.displayName)
++                                .font(.system(size: 13, weight: store.isUnread(session) ? .semibold : .regular))
++                                .lineLimit(1)
++                            Spacer(minLength: 4)
++                            Text(ageLabel(session.modified))
++                                .font(.system(size: 11))
++                                .foregroundStyle(.secondary)
++                            if store.isUnread(session) {
++                                Circle()
++                                    .fill(Color.accentColor)
++                                    .frame(width: 6, height: 6)
++                            }
++                        }
++                        Text(session.projectName)
 +                            .font(.system(size: 11))
 +                            .foregroundStyle(.secondary)
 +                            .lineLimit(1)
-+                        if let model = session.modelLabel {
-+                            Text(model)
-+                                .font(.system(size: 10))
++                        if let status = session.nativeStatusLabel {
++                            Text(status)
++                                .font(.system(size: 10, design: .monospaced))
 +                                .foregroundStyle(.tertiary)
 +                                .lineLimit(1)
++                                .truncationMode(.middle)
 +                        }
 +                    }
-+                    Spacer(minLength: 0)
-+                    if store.isUnread(session) {
-+                        Circle()
-+                            .fill(Color.accentColor)
-+                            .frame(width: 6, height: 6)
-+                    }
-+                }
 +                .padding(.vertical, 1)
 +                .tag(session.id)
 +                    .contextMenu {
