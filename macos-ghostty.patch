@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..47634ff
+index 0000000..6c5a96f
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,238 @@
+@@ -0,0 +1,245 @@
 +import Foundation
 +import SwiftUI
 +
@@ -155,7 +155,14 @@ index 0000000..47634ff
 +            } else if type == "message", title == nil,
 +                      let message = object["message"] as? [String: Any],
 +                      message["role"] as? String == "user" {
-+                if let text = message["content"] as? String {
++                let text = if let text = message["content"] as? String {
++                    text
++                } else if let content = message["content"] as? [[String: Any]] {
++                    content.compactMap { $0["text"] as? String }.joined(separator: " ")
++                } else {
++                    ""
++                }
++                if !text.isEmpty {
 +                    title = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
 +                }
 +            }
