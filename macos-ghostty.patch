@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..c2c56b8
+index 0000000..035c1f8
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1338 @@
+@@ -0,0 +1,1345 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -100,6 +100,16 @@ index 0000000..c2c56b8
 +    private var statusRefreshInFlight = false
 +    private var requestedActiveSession: URL?
 +    private var loadingReadyAt = Date.distantPast
++
++    private nonisolated static var agentDirectory: URL {
++        let environment = ProcessInfo.processInfo.environment
++        if let override = environment["PIM_AGENT_DIR"] ?? environment["PI_CODING_AGENT_DIR"],
++           !override.isEmpty {
++            return URL(fileURLWithPath: override).standardizedFileURL
++        }
++        return FileManager.default.homeDirectoryForCurrentUser
++            .appendingPathComponent(".pi/agent", isDirectory: true)
++    }
 +    private var searchGeneration = 0
 +
 +    init() {
@@ -239,8 +249,7 @@ index 0000000..c2c56b8
 +    }
 +
 +    private nonisolated static func searchTranscript(query: String) -> [URL: String] {
-+        let root = FileManager.default.homeDirectoryForCurrentUser
-+            .appendingPathComponent(".pi/agent/sessions")
++        let root = agentDirectory.appendingPathComponent("sessions", isDirectory: true)
 +        var matches: [URL: String] = [:]
 +        guard let enumerator = FileManager.default.enumerator(
 +            at: root,
@@ -297,8 +306,8 @@ index 0000000..c2c56b8
 +        let resolvedCwd = URL(fileURLWithPath: cwd).standardized.path
 +        let encodedCwd = resolvedCwd.hasPrefix("/") ? String(resolvedCwd.dropFirst()) : resolvedCwd
 +        let directory = "--\(encodedCwd.replacingOccurrences(of: "/", with: "-"))--"
-+        let root = FileManager.default.homeDirectoryForCurrentUser
-+            .appendingPathComponent(".pi/agent/sessions")
++        let root = Self.agentDirectory
++            .appendingPathComponent("sessions", isDirectory: true)
 +            .appendingPathComponent(directory, isDirectory: true)
 +        let file = root.appendingPathComponent(
 +            "\(timestamp.replacingOccurrences(of: ":", with: "-").replacingOccurrences(of: ".", with: "-"))_\(id).jsonl")
@@ -402,7 +411,7 @@ index 0000000..c2c56b8
 +    }
 +
 +    private nonisolated static func loadStatus() -> PimStatusSnapshot {
-+        let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".pi/agent")
++        let root = agentDirectory
 +        var states: [URL: String] = [:]
 +        var roles: [URL: String] = [:]
 +        var newestForeground: (URL, Double)?
@@ -444,8 +453,7 @@ index 0000000..c2c56b8
 +    private nonisolated static func loadSessions(cached: [URL: (Date, PimSession)]) -> ([PimSession], [URL: (Date, PimSession)]) {
 +        var sessions: [PimSession] = []
 +        var nextCache: [URL: (Date, PimSession)] = [:]
-+        let root = FileManager.default.homeDirectoryForCurrentUser
-+            .appendingPathComponent(".pi/agent/sessions")
++        let root = agentDirectory.appendingPathComponent("sessions", isDirectory: true)
 +        let contextWindows = modelContextWindows()
 +        guard let enumerator = FileManager.default.enumerator(
 +            at: root,
@@ -593,8 +601,7 @@ index 0000000..c2c56b8
 +    }
 +
 +    private nonisolated static func modelContextWindows() -> [String: Int] {
-+        let url = FileManager.default.homeDirectoryForCurrentUser
-+            .appendingPathComponent(".pi/agent/models-store.json")
++        let url = agentDirectory.appendingPathComponent("models-store.json")
 +        guard let data = try? Data(contentsOf: url),
 +              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
 +        var result: [String: Int] = [:]
@@ -1366,7 +1373,7 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..d3a5a1f 100644
+index 340a0b4..ff4e2ea 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -6,6 +6,10 @@ import GhosttyKit
@@ -1380,7 +1387,7 @@ index 340a0b4..d3a5a1f 100644
      override var windowNibName: NSNib.Name? {
          let defaultValue = "Terminal"
 
-@@ -57,6 +61,22 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -57,6 +61,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
      /// The configuration derived from the Ghostty config so we don't need to rely on references.
      private(set) var derivedConfig: DerivedConfig
@@ -1388,7 +1395,6 @@ index 340a0b4..d3a5a1f 100644
 +    private let pimSidebarVisibility = PimSidebarVisibility()
 +    private let pimSearchState = PimSearchState()
 +    private var pimSidebarAccessory: PimSidebarAccessoryViewController?
-+    private var pimAppearanceObserver: NSObjectProtocol?
 +
 +    private lazy var pimSessionStore = PimSessionStore()
 +    private var pimSurfaces: [URL: Ghostty.SurfaceView] = [:]
@@ -1403,7 +1409,7 @@ index 340a0b4..d3a5a1f 100644
 
      /// The notification cancellable for focused surface property changes.
      private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
-@@ -66,17 +86,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -66,17 +85,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
           withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
           parent: NSWindow? = nil
      ) {
@@ -1427,18 +1433,15 @@ index 340a0b4..d3a5a1f 100644
 
          // Setup our notifications for behaviors
          let center = NotificationCenter.default
-@@ -140,6 +164,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -140,6 +163,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      }
 
      deinit {
 +        pimProcessMonitor?.invalidate()
-+        if let pimAppearanceObserver {
-+            NotificationCenter.default.removeObserver(pimAppearanceObserver)
-+        }
          // Remove all of our notificationcenter subscriptions
          let center = NotificationCenter.default
          center.removeObserver(self)
-@@ -190,7 +218,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -190,7 +214,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          _ newTree: SplitTree<Ghostty.SurfaceView>,
          moveFocusTo newView: Ghostty.SurfaceView? = nil,
          moveFocusFrom oldView: Ghostty.SurfaceView? = nil,
@@ -1448,7 +1451,7 @@ index 340a0b4..d3a5a1f 100644
      ) {
          // We have a special case if our tree is empty to close our tab immediately.
          // This makes it so that undo is handled properly.
-@@ -203,7 +232,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -203,7 +228,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              newTree,
              moveFocusTo: newView,
              moveFocusFrom: oldView,
@@ -1458,7 +1461,7 @@ index 340a0b4..d3a5a1f 100644
      }
 
      // MARK: Terminal Creation
-@@ -621,6 +651,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -621,6 +647,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
          // Sync our zoom state for splits
          window.surfaceIsZoomed = surfaceTree.zoomed != nil
@@ -1469,7 +1472,7 @@ index 340a0b4..d3a5a1f 100644
 
          // Set the font for the window and tab titles.
          if let titleFontName = surfaceConfig.windowTitleFontFamily {
-@@ -631,6 +665,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -631,6 +661,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
          // Call this last in case it uses any of the properties above.
          window.syncAppearance(surfaceConfig)
@@ -1488,7 +1491,7 @@ index 340a0b4..d3a5a1f 100644
          terminalViewContainer?.ghosttyConfigDidChange(ghostty.config, preferredBackgroundColor: window.preferredBackgroundColor)
      }
 
-@@ -1051,6 +1097,151 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1093,151 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
 
@@ -1640,7 +1643,7 @@ index 340a0b4..d3a5a1f 100644
      // MARK: - NSWindowController
 
      override func windowWillLoad() {
-@@ -1068,6 +1259,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1068,6 +1255,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          // use whatever the latest app-level config is.
          let config = ghostty.config
 
@@ -1648,21 +1651,12 @@ index 340a0b4..d3a5a1f 100644
 +            // Pim follows the user's macOS appearance instead of locking the
 +            // application to the terminal's configured window theme.
 +            NSApplication.shared.appearance = nil
-+            pimAppearanceObserver = NotificationCenter.default.addObserver(
-+                forName: Notification.Name("NSApplicationDidChangeEffectiveAppearanceNotification"),
-+                object: nil,
-+                queue: .main
-+            ) { [weak self] _ in
-+                guard let self else { return }
-+                self.updateColorSchemeForSurfaceTree()
-+                self.syncAppearance()
-+            }
 +        }
 +
          // Setting all three of these is required for restoration to work.
          window.isRestorable = restorable
          if restorable {
-@@ -1083,9 +1289,33 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1083,9 +1276,33 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              focusedSurface = view
          }
 
@@ -1697,7 +1691,7 @@ index 340a0b4..d3a5a1f 100644
          }
 
          // Set the initial content size on the container so that
-@@ -1095,7 +1325,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1312,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
 
          window.contentView = container
