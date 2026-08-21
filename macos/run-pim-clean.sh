@@ -14,4 +14,4 @@ export PIM_AGENT_DIR="$AGENT_DIR"
 export PI_CODING_AGENT_DIR="$AGENT_DIR"
 
 printf 'Pim clean screenshot environment: %s\n' "$AGENT_DIR"
-"$ROOT/macos/run-pim.sh"
+"$ROOT/macos/run-pim.sh" >/dev/null 2>&1

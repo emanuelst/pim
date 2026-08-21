@@ -1684,7 +1684,7 @@ index 340a0b4..aba8983 100644
          // Setting all three of these is required for restoration to work.
          window.isRestorable = restorable
          if restorable {
-@@ -1083,9 +1277,33 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1083,9 +1277,36 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              focusedSurface = view
          }
 
@@ -1708,8 +1708,11 @@ index 340a0b4..aba8983 100644
 +                sidebarVisibility: pimSidebarVisibility,
 +                searchState: pimSearchState,
 +                onAppearanceChange: { [weak self] in
++                    // The surface color-scheme update already propagates
++                    // through Ghostty's appearance notification. Calling
++                    // syncAppearance here would recursively change the
++                    // window appearance while SwiftUI is updating the view.
 +                    self?.updateColorSchemeForSurfaceTree()
-+                    self?.syncAppearance()
 +                },
 +                onOpen: { [weak self] session in
 +                    self?.pimSessionStore.markRead(session)
