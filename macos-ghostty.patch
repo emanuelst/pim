@@ -2093,3 +2093,98 @@ index 0dbdeef..289acb7 100644
              mouseOverSurface = false
              mouseLocationInSurface = nil
              guard let surfaceModel else { return }
+diff --git a/src/Surface.zig b/src/Surface.zig
+index c57eeab..5382848 100644
+--- a/src/Surface.zig
++++ b/src/Surface.zig
+@@ -2527,8 +2527,9 @@ fn resize(self: *Surface, size: rendererpkg.ScreenSize) !void {
+             "set. Is your padding reasonable?", .{});
+     }
+
+-    // Mail the IO thread
+-    self.queueIo(.{ .resize = self.size }, .unlocked);
++    // Resize is latest-wins and must bypass ordinary input backlog. A large
++    // tool result can otherwise delay the visible terminal reflow by seconds.
++    self.io.queueResize(self.size);
+ }
+
+ /// Recalculate the balanced padding if needed.
+diff --git a/src/termio/Termio.zig b/src/termio/Termio.zig
+index 0f8a7cc..a39c745 100644
+--- a/src/termio/Termio.zig
++++ b/src/termio/Termio.zig
+@@ -61,6 +61,11 @@ size: renderer.Size,
+ /// The mailbox implementation to use.
+ mailbox: termio.Mailbox,
+
++/// A latest-wins resize request that is serviced ahead of ordinary input.
++/// Large tool output can otherwise leave a resize message behind a long
++/// mailbox backlog.
++pending_resize: std.atomic.Value(?*renderer.Size) = .init(null),
++
+ /// The stream parser. This parses the stream of escape codes and so on
+ /// from the child process and calls callbacks in the stream handler.
+ terminal_stream: StreamHandler.Stream,
+@@ -316,6 +321,7 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
+         .size = opts.size,
+         .backend = backend,
+         .mailbox = opts.mailbox,
++        .pending_resize = .init(null),
+         .terminal_stream = .init(.{
+             .allocator = alloc,
+             .handler = handler,
+@@ -325,6 +331,9 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
+ }
+
+ pub fn deinit(self: *Termio) void {
++    if (self.pending_resize.swap(null, .acquire)) |ptr| {
++        self.alloc.destroy(ptr);
++    }
+     self.backend.deinit();
+     self.terminal.deinit(self.alloc);
+     self.config.deinit();
+@@ -337,6 +346,23 @@ pub fn deinit(self: *Termio) void {
+     if (self.thread_enter_state) |v| v.destroy();
+ }
+
++/// Queue a latest-wins resize ahead of ordinary terminal input.
++pub fn queueResize(self: *Termio, size: renderer.Size) void {
++    const ptr = self.alloc.create(renderer.Size) catch return;
++    ptr.* = size;
++    if (self.pending_resize.swap(ptr, .acq_rel)) |old| {
++        self.alloc.destroy(old);
++    }
++    self.mailbox.notify();
++}
++
++/// Take the latest pending resize, if one exists.
++pub fn takePendingResize(self: *Termio) ?renderer.Size {
++    const ptr = self.pending_resize.swap(null, .acquire) orelse return null;
++    defer self.alloc.destroy(ptr);
++    return ptr.*;
++}
++
+ pub fn threadEnter(
+     self: *Termio,
+     thread: *termio.Thread,
+diff --git a/src/termio/Thread.zig b/src/termio/Thread.zig
+index 6b860a0..5835669 100644
+--- a/src/termio/Thread.zig
++++ b/src/termio/Thread.zig
+@@ -306,6 +306,16 @@ fn drainMailbox(
+     // expectation is that all our message handlers will be non-blocking
+     // ENOUGH to not mess up throughput on producers.
+     var redraw: bool = false;
++
++    // A resize is out-of-band so it cannot sit behind a burst of ordinary
++    // input messages from a busy tool call.
++    if (io.takePendingResize()) |resize| {
++        redraw = true;
++        io.resize(data, resize) catch |err| {
++            log.warn("error during priority resize err={}", .{err});
++        };
++    }
++
+     while (mailbox.pop(global.io())) |message| {
+         // If we have a message we always redraw
+         redraw = true;
