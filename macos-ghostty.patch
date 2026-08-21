@@ -1,11 +1,29 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..1a8bf45
+index 0000000..8689f80
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,498 @@
+@@ -0,0 +1,488 @@
 +import Foundation
 +import SwiftUI
++
++final class PimWindowDragView: NSView {
++    override func mouseDown(with event: NSEvent) {
++        window?.performDrag(with: event)
++    }
++
++    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
++        true
++    }
++}
++
++struct PimWindowDragRegion: NSViewRepresentable {
++    func makeNSView(context: Context) -> PimWindowDragView {
++        PimWindowDragView()
++    }
++
++    func updateNSView(_ nsView: PimWindowDragView, context: Context) {}
++}
 +
 +private struct PimStatusSnapshot: Sendable {
 +    let states: [URL: String]
@@ -53,20 +71,16 @@ index 0000000..1a8bf45
 +    @Published private(set) var sessions: [PimSession] = []
 +    @Published private(set) var activeSession: URL?
 +    @Published private(set) var activeStates: [URL: String] = [:]
-+    @Published private(set) var activeRoles: [URL: String] = [:]
 +    @Published private(set) var switchingTo: URL?
 +    @Published private var readAt: [String: TimeInterval]
-+    @Published private var keptActivePaths: Set<String>
 +    private var timer: Timer?
 +    private static let readStateKey = "Pim.readAt"
-+    private static let activeStateKey = "Pim.keptActive"
 +    private var cache: [URL: (Date, PimSession)] = [:]
 +    private var refreshInFlight = false
 +    private var requestedActiveSession: URL?
 +
 +    init() {
 +        readAt = UserDefaults.standard.dictionary(forKey: Self.readStateKey) as? [String: TimeInterval] ?? [:]
-+        keptActivePaths = Set(UserDefaults.standard.stringArray(forKey: Self.activeStateKey) ?? [])
 +        refresh()
 +        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
 +            Task { @MainActor [weak self] in self?.refresh() }
@@ -92,21 +106,6 @@ index 0000000..1a8bf45
 +        UserDefaults.standard.set(readAt, forKey: Self.readStateKey)
 +    }
 +
-+    func isKeptActive(_ session: PimSession) -> Bool {
-+        isKeptActivePath(session.id)
-+    }
-+
-+    func isKeptActivePath(_ path: URL) -> Bool {
-+        keptActivePaths.contains(path.path)
-+    }
-+
-+    func toggleKeptActive(_ session: PimSession) {
-+        if !keptActivePaths.insert(session.id.path).inserted {
-+            keptActivePaths.remove(session.id.path)
-+        }
-+        UserDefaults.standard.set(Array(keptActivePaths), forKey: Self.activeStateKey)
-+    }
-+
 +    func refresh() {
 +        guard !refreshInFlight else { return }
 +        refreshInFlight = true
@@ -128,7 +127,6 @@ index 0000000..1a8bf45
 +
 +    private func applyStatus(_ status: PimStatusSnapshot) {
 +        if activeStates != status.states { activeStates = status.states }
-+        if activeRoles != status.roles { activeRoles = status.roles }
 +        if requestedActiveSession == status.foregroundSession {
 +            requestedActiveSession = nil
 +            switchingTo = nil
@@ -354,7 +352,6 @@ index 0000000..1a8bf45
 +    @State private var programmaticSelection: PimSession.ID?
 +    let onOpen: (PimSession) -> Void
 +    let onNew: () -> Void
-+    let onToggleActive: (PimSession) -> Void
 +
 +    var body: some View {
 +        VStack(spacing: 0) {
@@ -369,26 +366,6 @@ index 0000000..1a8bf45
 +                        .foregroundStyle(.secondary)
 +                }
 +                Spacer()
-+                if let selection,
-+                   let session = store.sessions.first(where: { $0.id == selection }) {
-+                    Menu {
-+                        Button(store.isKeptActive(session) ? "Stop in Background" : "Keep Active") {
-+                            store.toggleKeptActive(session)
-+                            onToggleActive(session)
-+                        }
-+                        Button(store.isUnread(session) ? "Mark as Read" : "Mark as Unread") {
-+                            if store.isUnread(session) {
-+                                store.markRead(session)
-+                            } else {
-+                                store.markUnread(session)
-+                            }
-+                        }
-+                    } label: {
-+                        Image(systemName: "ellipsis.circle")
-+                    }
-+                    .menuStyle(.borderlessButton)
-+                    .help("Chat options")
-+                }
 +                Button(action: onNew) {
 +                    Image(systemName: "plus")
 +                }
@@ -413,14 +390,18 @@ index 0000000..1a8bf45
 +                                Circle()
 +                                    .fill(state == "working" ? Color.orange : Color.green)
 +                                    .frame(width: 6, height: 6)
-+                            } else if store.isKeptActive(session) {
++                                    .accessibilityLabel(state == "working" ? "Working" : "Warm and idle")
++                            } else {
 +                                Circle()
-+                                    .fill(Color.blue)
++                                    .stroke(Color.secondary.opacity(0.55), lineWidth: 1)
 +                                    .frame(width: 6, height: 6)
-+                            } else if store.isUnread(session) {
++                                    .accessibilityLabel("Cold")
++                            }
++                            if store.isUnread(session) {
 +                                Circle()
 +                                    .fill(Color.accentColor)
 +                                    .frame(width: 6, height: 6)
++                                    .accessibilityLabel("Unread")
 +                            }
 +                        }
 +                        Text(session.projectName)
@@ -439,6 +420,15 @@ index 0000000..1a8bf45
 +                                    .font(.system(size: 10, design: .monospaced))
 +                                    .foregroundStyle(.tertiary)
 +                                    .fixedSize()
++                            }
++                        }
++                    }
++                    .contextMenu {
++                        Button(store.isUnread(session) ? "Mark as Read" : "Mark as Unread") {
++                            if store.isUnread(session) {
++                                store.markRead(session)
++                            } else {
++                                store.markUnread(session)
 +                            }
 +                        }
 +                    }
@@ -526,10 +516,10 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..4713d80 100644
+index 340a0b4..559422a 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
-@@ -58,6 +58,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -58,6 +58,14 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      /// The configuration derived from the Ghostty config so we don't need to rely on references.
      private(set) var derivedConfig: DerivedConfig
 
@@ -539,14 +529,12 @@ index 340a0b4..4713d80 100644
 +    private var pimForegroundSurface: Ghostty.SurfaceView?
 +    private var pimForegroundSession: URL?
 +    private var pimPendingSession: PimSession?
-+    private var pimBackgroundStartInFlight = false
 +    private var currentPimSession: URL?
-+    private var pimSessionUpdates: AnyCancellable?
 +
      /// The notification cancellable for focused surface property changes.
      private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
 
-@@ -66,17 +76,26 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -66,17 +74,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
           withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
           parent: NSWindow? = nil
      ) {
@@ -567,15 +555,10 @@ index 340a0b4..4713d80 100644
 
 -        super.init(ghostty, baseConfig: base, surfaceTree: tree)
 +        super.init(ghostty, baseConfig: pimBase, surfaceTree: tree)
-+        pimSessionUpdates = pimSessionStore.$sessions.dropFirst().sink { [weak self] _ in
-+            DispatchQueue.main.async {
-+                self?.startKeptPimSessions()
-+            }
-+        }
 
          // Setup our notifications for behaviors
          let center = NotificationCenter.default
-@@ -190,7 +209,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -190,7 +202,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          _ newTree: SplitTree<Ghostty.SurfaceView>,
          moveFocusTo newView: Ghostty.SurfaceView? = nil,
          moveFocusFrom oldView: Ghostty.SurfaceView? = nil,
@@ -585,7 +568,7 @@ index 340a0b4..4713d80 100644
      ) {
          // We have a special case if our tree is empty to close our tab immediately.
          // This makes it so that undo is handled properly.
-@@ -203,7 +223,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -203,7 +216,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              newTree,
              moveFocusTo: newView,
              moveFocusFrom: oldView,
@@ -595,7 +578,7 @@ index 340a0b4..4713d80 100644
      }
 
      // MARK: Terminal Creation
-@@ -1051,6 +1072,122 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1065,84 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
 
@@ -618,17 +601,16 @@ index 340a0b4..4713d80 100644
 +            guard let self,
 +                  self.pimPendingSession?.id == session.id else { return }
 +            self.pimPendingSession = nil
-+            let view = self.makePimSurface(session, app: ghosttyApp, background: false)
++            let view = self.makePimSurface(session, app: ghosttyApp)
 +            self.pimSurfaces[session.id] = view
 +            self.showPimSurface(view, for: session)
 +        }
 +    }
 +
-+    private func makePimSurface(_ session: PimSession, app: ghostty_app_t, background: Bool) -> Ghostty.SurfaceView {
++    private func makePimSurface(_ session: PimSession, app: ghostty_app_t) -> Ghostty.SurfaceView {
 +        var config = Ghostty.SurfaceConfiguration()
 +        config.workingDirectory = session.cwd
 +        config.command = PimSessionStore.launchCommand(for: session)
-+        if background { config.environmentVariables["PIM_BACKGROUND"] = "1" }
 +        return Ghostty.SurfaceView(app, baseConfig: config)
 +    }
 +
@@ -659,43 +641,6 @@ index 340a0b4..4713d80 100644
 +        }
 +    }
 +
-+    private func togglePimActive(_ session: PimSession) {
-+        if pimSessionStore.isKeptActive(session) {
-+            if session.id == currentPimSession || session.id == pimSessionStore.activeSession {
-+                retainCurrentPimSurfaceIfNeeded()
-+            } else if pimSurfaces[session.id] == nil, let ghosttyApp = ghostty.app {
-+                pimSurfaces[session.id] = makePimSurface(session, app: ghosttyApp, background: true)
-+            }
-+        } else if session.id != currentPimSession {
-+            pimSurfaces.removeValue(forKey: session.id)
-+        }
-+    }
-+
-+    private func startKeptPimSessions() {
-+        guard !pimBackgroundStartInFlight,
-+              let ghosttyApp = ghostty.app else { return }
-+        let visible = pimSessionStore.activeSession
-+        if currentPimSession == nil { currentPimSession = visible }
-+        guard let session = pimSessionStore.sessions.first(where: {
-+            pimSessionStore.isKeptActive($0)
-+                && $0.id != visible
-+                && pimSurfaces[$0.id] == nil
-+        }) else { return }
-+
-+        pimBackgroundStartInFlight = true
-+        // Never create a burst of hidden AppKit/Metal surfaces in one loop.
-+        DispatchQueue.main.async { [weak self] in
-+            guard let self else { return }
-+            if self.pimSurfaces[session.id] == nil {
-+                self.pimSurfaces[session.id] = self.makePimSurface(session, app: ghosttyApp, background: true)
-+            }
-+            self.pimBackgroundStartInFlight = false
-+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-+                self?.startKeptPimSessions()
-+            }
-+        }
-+    }
-+
 +    private func newPimChat() {
 +        guard let ghosttyApp = ghostty.app else { return }
 +        var config = Ghostty.SurfaceConfiguration()
@@ -718,7 +663,7 @@ index 340a0b4..4713d80 100644
      // MARK: - NSWindowController
 
      override func windowWillLoad() {
-@@ -1085,7 +1222,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1085,7 +1177,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
          // Initialize our content view to the SwiftUI root
          let container = TerminalViewContainer {
@@ -730,17 +675,22 @@ index 340a0b4..4713d80 100644
 +                        self?.pimSessionStore.markRead(session)
 +                        self?.openPimSession(session)
 +                    },
-+                    onNew: { [weak self] in self?.newPimChat() },
-+                    onToggleActive: { [weak self] session in self?.togglePimActive(session) })
-+                TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
++                    onNew: { [weak self] in self?.newPimChat() })
++                VStack(spacing: 0) {
++                    PimWindowDragRegion()
++                        .frame(height: 30)
++                        .background(.bar)
++                    TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
++                }
 +            }
          }
 
          // Set the initial content size on the container so that
-@@ -1095,6 +1242,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1201,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
 
          window.contentView = container
+-
 +        DispatchQueue.main.async { [weak self] in
 +            guard let self, self.pimForegroundSurface == nil,
 +                  let surface = self.focusedSurface,
@@ -748,12 +698,9 @@ index 340a0b4..4713d80 100644
 +            self.pimForegroundSurface = surface
 +            self.pimForegroundSession = self.currentPimSession
 +        }
-+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-+            self?.startKeptPimSessions()
-+        }
-
          // If we have a default size, we want to apply it.
          if let defaultSize {
+             defaultSize.apply(to: window)
 diff --git a/macos/Sources/Features/Terminal/TerminalView.swift b/macos/Sources/Features/Terminal/TerminalView.swift
 index b6e1c63..cd56c2d 100644
 --- a/macos/Sources/Features/Terminal/TerminalView.swift
@@ -769,7 +716,7 @@ index b6e1c63..cd56c2d 100644
                      }
 
 diff --git a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
-index d907db9..1816e80 100644
+index d907db9..c2a3894 100644
 --- a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
 +++ b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
 @@ -55,10 +55,13 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
@@ -781,7 +728,7 @@ index d907db9..1816e80 100644
 -        standardWindowButton(.miniaturizeButton)?.isHidden = true
 -        standardWindowButton(.zoomButton)?.isHidden = true
 +        let isPim = Bundle.main.bundleURL.lastPathComponent == "Pim.app"
-+        isMovableByWindowBackground = isPim
++        isMovableByWindowBackground = false
 +        if !isPim {
 +            standardWindowButton(.closeButton)?.isHidden = true
 +            standardWindowButton(.miniaturizeButton)?.isHidden = true
