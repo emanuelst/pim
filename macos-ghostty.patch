@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..771d93f
+index 0000000..6bf4d34
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,742 @@
+@@ -0,0 +1,748 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -466,19 +466,26 @@ index 0000000..771d93f
 +}
 +
 +private struct PimGlassBackground: NSViewRepresentable {
++    let superGlass: Bool
++
 +    func makeNSView(context: Context) -> NSVisualEffectView {
-+        let view = NSVisualEffectView()
-+        // Keep one stable frosted base in both modes. Super Glass adds
-+        // Liquid Glass refraction on top instead of changing the window
-+        // material, opacity, and background state underneath it.
-+        view.material = .underWindowBackground
-+        view.blendingMode = .behindWindow
-+        view.state = .active
-+        return view
++        NSVisualEffectView()
 +    }
 +
 +    func updateNSView(_ view: NSVisualEffectView, context: Context) {
++        if superGlass {
++            // Super Glass reveals the vivid content behind the window.
++            view.material = .underWindowBackground
++            view.blendingMode = .behindWindow
++        } else {
++            // Default mode is the calmer, native sidebar appearance.
++            view.material = .sidebar
++            view.blendingMode = .withinWindow
++        }
++        view.state = .active
 +        guard let window = view.window else { return }
++        // Keep the window transparent in both modes so toggling does not
++        // create a third intermediate appearance.
 +        window.isOpaque = false
 +        window.backgroundColor = .clear
 +        window.hasShadow = true
@@ -607,19 +614,18 @@ index 0000000..771d93f
 +        }
 +        .background {
 +            ZStack {
-+                PimGlassBackground()
++                PimGlassBackground(superGlass: superGlass)
++                    .id(superGlass)
 +                    .opacity(0.75)
 +                    .ignoresSafeArea(.container, edges: .top)
 +                    .allowsHitTesting(false)
 +                if superGlass {
 +#if compiler(>=6.2)
 +                    if #available(macOS 26.0, *) {
-+                        Color.clear
-+                            // Regular Liquid Glass makes the refraction visible.
-+                            // The stable frosted base underneath keeps this from
-+                            // becoming a third background state.
-+                            .glassEffect(.regular, in: Rectangle())
-+                            .opacity(0.9)
++                        Color.white.opacity(0.02)
++                            // Clear Liquid Glass adds refraction without
++                            // replacing the Super Glass base with a gray fill.
++                            .glassEffect(.clear, in: Rectangle())
 +                            .id("super-glass-refraction")
 +                            .ignoresSafeArea(.container, edges: .top)
 +                            .allowsHitTesting(false)
