@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..785cb23
+index 0000000..2f0f250
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,687 @@
+@@ -0,0 +1,689 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -561,9 +561,11 @@ index 0000000..785cb23
 +#if compiler(>=6.2)
 +                    if #available(macOS 26.0, *) {
 +                        Color.clear
-+                            // Clear is the transparent Liquid Glass variant:
-+                            // it adds refraction without adding a second gray fill.
-+                            .glassEffect(.clear, in: Rectangle())
++                            // Regular Liquid Glass makes the refraction visible.
++                            // The stable frosted base underneath keeps this from
++                            // becoming a third background state.
++                            .glassEffect(.regular, in: Rectangle())
++                            .opacity(0.9)
 +                            .id("super-glass-refraction")
 +                            .ignoresSafeArea(.container, edges: .top)
 +                            .allowsHitTesting(false)
