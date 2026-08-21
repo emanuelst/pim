@@ -616,6 +616,20 @@ index 340a0b4..691794c 100644
  
          // If we have a default size, we want to apply it.
          if let defaultSize {
+diff --git a/macos/Sources/Features/Terminal/TerminalView.swift b/macos/Sources/Features/Terminal/TerminalView.swift
+index b6e1c63..cd56c2d 100644
+--- a/macos/Sources/Features/Terminal/TerminalView.swift
++++ b/macos/Sources/Features/Terminal/TerminalView.swift
+@@ -75,7 +75,8 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
+                 VStack(spacing: 0) {
+                     // If we're running in debug mode we show a warning so that users
+                     // know that performance will be degraded.
+-                    if Ghostty.info.mode == GHOSTTY_BUILD_MODE_DEBUG || Ghostty.info.mode == GHOSTTY_BUILD_MODE_RELEASE_SAFE {
++                    if (Ghostty.info.mode == GHOSTTY_BUILD_MODE_DEBUG || Ghostty.info.mode == GHOSTTY_BUILD_MODE_RELEASE_SAFE),
++                       Bundle.main.bundleURL.lastPathComponent != "Pim.app" {
+                         DebugBuildWarningView()
+                     }
+ 
 diff --git a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
 index d907db9..1816e80 100644
 --- a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift	
