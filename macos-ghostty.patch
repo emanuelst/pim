@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..4879cf5
+index 0000000..61c167c
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,666 @@
+@@ -0,0 +1,677 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -86,7 +86,9 @@ index 0000000..4879cf5
 +    private var needsInitialReadMigration: Bool
 +    private var cache: [URL: (Date, PimSession)] = [:]
 +    private var refreshInFlight = false
++    private var statusRefreshInFlight = false
 +    private var requestedActiveSession: URL?
++    private var loadingReadyAt = Date.distantPast
 +
 +    init() {
 +        readAt = UserDefaults.standard.dictionary(forKey: Self.readStateKey) as? [String: TimeInterval] ?? [:]
@@ -97,7 +99,7 @@ index 0000000..4879cf5
 +        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
 +            Task { @MainActor [weak self] in self?.refresh() }
 +        }
-+        statusTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
++        statusTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
 +            Task { @MainActor [weak self] in self?.refreshStatus() }
 +        }
 +    }
@@ -219,18 +221,22 @@ index 0000000..4879cf5
 +    }
 +
 +    private func refreshStatus() {
-+        DispatchQueue.global(qos: .utility).async { [weak self] in
++        guard !statusRefreshInFlight else { return }
++        statusRefreshInFlight = true
++        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
 +            let status = Self.loadStatus()
 +            Task { @MainActor [weak self] in
 +                guard let self else { return }
 +                self.applyStatus(status)
++                self.statusRefreshInFlight = false
 +            }
 +        }
 +    }
 +
 +    private func applyStatus(_ status: PimStatusSnapshot) {
 +        if activeStates != status.states { activeStates = status.states }
-+        if requestedActiveSession == status.foregroundSession {
++        if requestedActiveSession == status.foregroundSession,
++           Date() >= loadingReadyAt {
 +            requestedActiveSession = nil
 +            switchingTo = nil
 +        }
@@ -241,6 +247,7 @@ index 0000000..4879cf5
 +    func requestActiveSession(_ session: URL) {
 +        requestedActiveSession = session
 +        switchingTo = session
++        loadingReadyAt = Date().addingTimeInterval(0.65)
 +        activeSession = session
 +        let request = session
 +        Task { @MainActor [weak self] in
@@ -257,8 +264,12 @@ index 0000000..4879cf5
 +        var states: [URL: String] = [:]
 +        var roles: [URL: String] = [:]
 +        var newestForeground: (URL, Double)?
-+        if let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) {
-+            for case let url as URL in files where url.lastPathComponent.hasPrefix("pim-status-") {
++        if let files = try? FileManager.default.contentsOfDirectory(
++            at: root,
++            includingPropertiesForKeys: nil,
++            options: [.skipsHiddenFiles]
++        ) {
++            for url in files where url.lastPathComponent.hasPrefix("pim-status-") {
 +                guard let data = try? Data(contentsOf: url),
 +                      let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
 +                      let path = status["session"] as? String,
@@ -694,7 +705,7 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..5bebed4 100644
+index 340a0b4..7e32796 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -58,6 +58,14 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
@@ -845,7 +856,7 @@ index 340a0b4..5bebed4 100644
      // MARK: - NSWindowController
 
      override func windowWillLoad() {
-@@ -1085,7 +1181,33 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1085,7 +1181,42 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
          // Initialize our content view to the SwiftUI root
          let container = TerminalViewContainer {
@@ -864,15 +875,24 @@ index 340a0b4..5bebed4 100644
 +                        .background(.bar)
 +                    ZStack {
 +                        TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
-+                        if pimSessionStore.switchingTo != nil {
-+                            VStack(spacing: 10) {
++                        if let loadingID = pimSessionStore.switchingTo {
++                            let loadingName = pimSessionStore.sessions
++                                .first(where: { $0.id == loadingID })
++                                .map { pimSessionStore.displayName(for: $0) } ?? "chat"
++                            VStack(spacing: 12) {
 +                                ProgressView()
-+                                Text("Loading chat…")
++                                    .controlSize(.small)
++                                    .tint(.accentColor)
++                                Text("Opening \(loadingName)")
 +                                    .font(.headline)
++                                    .lineLimit(1)
++                                Text("Starting Pi…")
++                                    .font(.subheadline)
 +                                    .foregroundStyle(.secondary)
 +                            }
 +                            .frame(maxWidth: .infinity, maxHeight: .infinity)
 +                            .background(.regularMaterial)
++                            .transition(.opacity)
 +                        }
 +                    }
 +                }
@@ -880,7 +900,7 @@ index 340a0b4..5bebed4 100644
          }
 
          // Set the initial content size on the container so that
-@@ -1095,7 +1217,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1226,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
 
          window.contentView = container
