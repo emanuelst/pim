@@ -1,9 +1,38 @@
+diff --git a/macos/Sources/Features/About/AboutController.swift b/macos/Sources/Features/About/AboutController.swift
+index ace9205..2ef2591 100644
+--- a/macos/Sources/Features/About/AboutController.swift
++++ b/macos/Sources/Features/About/AboutController.swift
+@@ -12,7 +12,12 @@ class AboutController: NSWindowController, NSWindowDelegate {
+         guard let window = window else { return }
+         window.center()
+         window.isMovableByWindowBackground = true
+-        window.contentView = NSHostingView(rootView: AboutView().environmentObject(viewModel))
++        if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
++            window.contentView = NSHostingView(rootView: PimAboutView())
++            window.title = "Pim"
++        } else {
++            window.contentView = NSHostingView(rootView: AboutView().environmentObject(viewModel))
++        }
+         window.titlebarAppearsTransparent = true
+     }
+
+@@ -20,7 +25,9 @@ class AboutController: NSWindowController, NSWindowDelegate {
+
+     func show() {
+         window?.makeKeyAndOrderFront(nil)
+-        viewModel.startCyclingIcons()
++        if Bundle.main.bundleURL.lastPathComponent != "Pim.app" {
++            viewModel.startCyclingIcons()
++        }
+     }
+
+     func hide() {
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..564bc88
+index 0000000..99adb20
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1373 @@
+@@ -0,0 +1,1406 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -14,14 +43,28 @@ index 0000000..564bc88
 +        guard Bundle.main.bundleURL.lastPathComponent == "Pim.app" else { return }
 +
 +        func apply() {
-+            guard let applicationMenu = NSApp.mainMenu?.items.first(where: {
-+                $0.submenu?.items.contains(where: { item in
-+                    item.title.localizedCaseInsensitiveContains("about ")
-+                }) == true
-+            }), let aboutItem = applicationMenu.submenu?.items.first(where: {
-+                $0.title.localizedCaseInsensitiveContains("about ")
-+            }) else { return }
-+            aboutItem.title = "About Pim"
++            guard let mainMenu = NSApp.mainMenu else { return }
++            if let applicationMenu = mainMenu.items.first(where: {
++                $0.submenu?.items.contains(where: { $0.title.localizedCaseInsensitiveContains("about ") }) == true
++            }) {
++                applicationMenu.title = "Pim"
++            }
++
++            func update(_ menu: NSMenu) {
++                for item in menu.items {
++                    switch item.title {
++                    case "About Ghostty": item.title = "About Pim"
++                    case "Hide Ghostty": item.title = "Hide Pim"
++                    case "Quit Ghostty": item.title = "Quit Pim"
++                    case "Check for Updates...",
++                         "Make Ghostty the Default Terminal",
++                         "Ghostty Help": item.isHidden = true
++                    default: break
++                    }
++                    if let submenu = item.submenu { update(submenu) }
++                }
++            }
++            update(mainMenu)
 +        }
 +
 +        apply()
@@ -943,6 +986,25 @@ index 0000000..564bc88
 +    }
 +}
 +
++struct PimAboutView: View {
++    var body: some View {
++        VStack(spacing: 18) {
++            if let icon = NSApp.applicationIconImage {
++                Image(nsImage: icon)
++                    .resizable()
++                    .interpolation(.high)
++                    .scaledToFit()
++                    .frame(width: 96, height: 96)
++            }
++            Text("Pim")
++                .font(.title.bold())
++        }
++        .padding(36)
++        .frame(width: 280, height: 250)
++        .background(.regularMaterial)
++    }
++}
++
 +struct PimSearchPanel: View {
 +    @ObservedObject var store: PimSessionStore
 +    @ObservedObject var state: PimSearchState
@@ -1401,7 +1463,7 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..aba8983 100644
+index 340a0b4..5295e7e 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -6,6 +6,10 @@ import GhosttyKit
@@ -1730,7 +1792,7 @@ index 340a0b4..aba8983 100644
          }
 
          // Set the initial content size on the container so that
-@@ -1095,7 +1313,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1316,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
 
          window.contentView = container

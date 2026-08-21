@@ -28,6 +28,11 @@ rm -rf "$ROOT/build"
 ditto "$PWD/build/Debug/Ghostty.app" "$ROOT/build/Pim.app"
 cp "$ROOT/macos/pim-bridge.ts" "$ROOT/build/Pim.app/Contents/Resources/pim-bridge.ts"
 
+# Preserve the third-party license required by Ghostty's MIT license.
+LICENSE_DIR="$ROOT/build/Pim.app/Contents/Resources/Third-Party-Licenses"
+mkdir -p "$LICENSE_DIR"
+cp "$GHOSTTY/LICENSE" "$LICENSE_DIR/Ghostty-LICENSE.txt"
+
 # Replace Ghostty's inherited icon with Pim's native app icon.
 ICONSET="$ROOT/build/Pim.iconset"
 mkdir -p "$ICONSET"
