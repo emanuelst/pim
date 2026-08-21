@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..87dd1ff
+index 0000000..2f6e129
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1289 @@
+@@ -0,0 +1,1291 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -1065,6 +1065,7 @@ index 0000000..87dd1ff
 +    @ObservedObject var ghostty: Ghostty.App
 +    @ObservedObject var viewModel: ViewModel
 +    let delegate: (any TerminalViewDelegate)?
++    @ObservedObject var appearance: PimTerminalAppearance
 +    @ObservedObject var sidebarVisibility: PimSidebarVisibility
 +    @ObservedObject var searchState: PimSearchState
 +    @AppStorage("Pim.superGlass") private var superGlass = false
@@ -1081,6 +1082,7 @@ index 0000000..87dd1ff
 +                        onNew: onNew)
 +                }
 +                VStack(spacing: 0) {
++                    PimTitleBar(store: store, appearance: appearance)
 +                    ZStack {
 +                        TerminalView(ghostty: ghostty, viewModel: viewModel, delegate: delegate)
 +                        if store.activeSession == nil && store.switchingTo == nil {
@@ -1317,7 +1319,7 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..77e2a5d 100644
+index 340a0b4..cd430ef 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -6,6 +6,10 @@ import GhosttyKit
@@ -1331,7 +1333,7 @@ index 340a0b4..77e2a5d 100644
      override var windowNibName: NSNib.Name? {
          let defaultValue = "Terminal"
 
-@@ -57,6 +61,23 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -57,6 +61,22 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
      /// The configuration derived from the Ghostty config so we don't need to rely on references.
      private(set) var derivedConfig: DerivedConfig
@@ -1340,7 +1342,6 @@ index 340a0b4..77e2a5d 100644
 +    private let pimSearchState = PimSearchState()
 +    private var pimSidebarAccessory: PimSidebarAccessoryViewController?
 +    private var pimSearchAccessory: PimSearchAccessoryViewController?
-+    private var pimTitleCancellable: AnyCancellable?
 +
 +    private lazy var pimSessionStore = PimSessionStore()
 +    private var pimSurfaces: [URL: Ghostty.SurfaceView] = [:]
@@ -1355,7 +1356,7 @@ index 340a0b4..77e2a5d 100644
 
      /// The notification cancellable for focused surface property changes.
      private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
-@@ -66,17 +87,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -66,17 +86,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
           withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
           parent: NSWindow? = nil
      ) {
@@ -1379,7 +1380,7 @@ index 340a0b4..77e2a5d 100644
 
          // Setup our notifications for behaviors
          let center = NotificationCenter.default
-@@ -140,6 +165,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -140,6 +164,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      }
 
      deinit {
@@ -1387,7 +1388,7 @@ index 340a0b4..77e2a5d 100644
          // Remove all of our notificationcenter subscriptions
          let center = NotificationCenter.default
          center.removeObserver(self)
-@@ -190,7 +216,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -190,7 +215,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          _ newTree: SplitTree<Ghostty.SurfaceView>,
          moveFocusTo newView: Ghostty.SurfaceView? = nil,
          moveFocusFrom oldView: Ghostty.SurfaceView? = nil,
@@ -1397,7 +1398,7 @@ index 340a0b4..77e2a5d 100644
      ) {
          // We have a special case if our tree is empty to close our tab immediately.
          // This makes it so that undo is handled properly.
-@@ -203,7 +230,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -203,7 +229,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              newTree,
              moveFocusTo: newView,
              moveFocusFrom: oldView,
@@ -1407,7 +1408,7 @@ index 340a0b4..77e2a5d 100644
      }
 
      // MARK: Terminal Creation
-@@ -621,6 +649,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -621,6 +648,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
          // Sync our zoom state for splits
          window.surfaceIsZoomed = surfaceTree.zoomed != nil
@@ -1418,7 +1419,7 @@ index 340a0b4..77e2a5d 100644
 
          // Set the font for the window and tab titles.
          if let titleFontName = surfaceConfig.windowTitleFontFamily {
-@@ -631,6 +663,14 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -631,6 +662,14 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
          // Call this last in case it uses any of the properties above.
          window.syncAppearance(surfaceConfig)
@@ -1433,7 +1434,7 @@ index 340a0b4..77e2a5d 100644
          terminalViewContainer?.ghosttyConfigDidChange(ghostty.config, preferredBackgroundColor: window.preferredBackgroundColor)
      }
 
-@@ -1051,6 +1091,151 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1090,151 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
 
@@ -1585,7 +1586,7 @@ index 340a0b4..77e2a5d 100644
      // MARK: - NSWindowController
 
      override func windowWillLoad() {
-@@ -1083,9 +1268,28 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1083,9 +1267,29 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              focusedSurface = view
          }
 
@@ -1605,6 +1606,7 @@ index 340a0b4..77e2a5d 100644
 +                ghostty: ghostty,
 +                viewModel: self,
 +                delegate: self,
++                appearance: pimTerminalAppearance,
 +                sidebarVisibility: pimSidebarVisibility,
 +                searchState: pimSearchState,
 +                onOpen: { [weak self] session in
@@ -1615,24 +1617,11 @@ index 340a0b4..77e2a5d 100644
          }
 
          // Set the initial content size on the container so that
-@@ -1095,7 +1299,36 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1299,23 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
 
          window.contentView = container
 -
-+        pimTitleCancellable = Publishers.CombineLatest4(
-+            pimSessionStore.$activeSession,
-+            pimSessionStore.$switchingTo,
-+            pimSessionStore.$sessions,
-+            pimSessionStore.$customNames
-+        )
-+        .receive(on: RunLoop.main)
-+        .sink { [weak self] activeSession, switchingTo, sessions, _ in
-+            guard let self else { return }
-+            let id = switchingTo ?? activeSession
-+            self.window?.title = sessions.first(where: { $0.id == id })
-+                .map { self.pimSessionStore.displayName(for: $0) } ?? "Pim"
-+        }
 +        if pimSidebarAccessory == nil {
 +            let accessory = PimSidebarAccessoryViewController(visibility: pimSidebarVisibility)
 +            window.addTitlebarAccessoryViewController(accessory)
@@ -1668,19 +1657,16 @@ index b6e1c63..cd56c2d 100644
                      }
 
 diff --git a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
-index d907db9..ef133df 100644
+index d907db9..f443ba8 100644
 --- a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
 +++ b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
-@@ -51,14 +51,18 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
+@@ -51,14 +51,16 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
              styleMask = Self.hiddenStyleMask
          }
 
 -        // Hide the title
--        titleVisibility = .hidden
 +        let isPim = Bundle.main.bundleURL.lastPathComponent == "Pim.app"
-+        // Pim uses the native macOS titlebar for the active chat title. Other
-+        // Ghostty windows retain the completely hidden title treatment.
-+        titleVisibility = isPim ? .visible : .hidden
+         titleVisibility = .hidden
          titlebarAppearsTransparent = true
 
 -        // Hide the traffic lights (window control buttons)
@@ -1696,7 +1682,7 @@ index d907db9..ef133df 100644
 
          // Disallow tabbing if the titlebar is hidden, since that will (should) also hide the tab bar.
          tabbingMode = .disallowed
-@@ -66,7 +70,8 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
+@@ -66,7 +68,8 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
          // Nuke it from orbit -- hide the titlebar container entirely, just in case. There are
          // some operations that appear to bring back the titlebar visibility so this ensures
          // it is gone forever.
@@ -1706,18 +1692,19 @@ index d907db9..ef133df 100644
             let titleBarContainer = themeFrame.firstDescendant(withClassName: "NSTitlebarContainerView") {
              titleBarContainer.isHidden = true
          }
-@@ -88,9 +93,7 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
+@@ -88,9 +91,8 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
 
      override var title: String {
          didSet {
 -            // Updating the title text as above automatically reveals the
 -            // native title view in macOS 15.0 and above. Since we're using
 -            // a custom view instead, we need to re-hide it.
-+            // Reapply the native titlebar policy after the title changes.
++            // Updating the hidden titlebar policy after the title changes keeps
++            // the native title view from reappearing.
              reapplyHiddenStyle()
          }
      }
-@@ -98,6 +101,9 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
+@@ -98,6 +100,9 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
      // We override this so that with the hidden titlebar style the titlebar
      // area is not draggable.
      override var contentLayoutRect: CGRect {
