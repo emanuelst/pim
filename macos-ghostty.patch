@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..bc1b1f3
+index 0000000..c1ad52a
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,605 @@
+@@ -0,0 +1,607 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -469,6 +469,7 @@ index 0000000..bc1b1f3
 +                } label: {
 +                    Image(systemName: "wand.and.stars")
 +                        .foregroundStyle(superGlass ? Color.accentColor : .secondary)
++                        .scaleEffect(x: superGlass ? -1 : 1, y: 1)
 +                }
 +                .buttonStyle(.borderless)
 +                .help(superGlass ? "Turn Off Super Glass" : "Super Glass")
@@ -570,13 +571,14 @@ index 0000000..bc1b1f3
 +                    .allowsHitTesting(false)
 +                if superGlass {
 +                PimSuperGlassBackground()
-+                    .opacity(0.24)
++                    .opacity(0.75)
 +                    .ignoresSafeArea(.container, edges: .top)
 +                    .allowsHitTesting(false)
 +            } else {
 +#if compiler(>=6.2)
 +                if #available(macOS 26.0, *) {
-+                    Color.clear
++                    Color(nsColor: .windowBackgroundColor)
++                        .opacity(0.5)
 +                        .glassEffect(.clear, in: Rectangle())
 +                        .ignoresSafeArea(.container, edges: .top)
 +                } else {
