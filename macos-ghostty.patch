@@ -595,3 +595,17 @@ index 340a0b4..4f09d45 100644
  
          // If we have a default size, we want to apply it.
          if let defaultSize {
+diff --git a/macos/Sources/Ghostty/Ghostty.Config.swift b/macos/Sources/Ghostty/Ghostty.Config.swift
+index bfe42b1..1c8aca7 100644
+--- a/macos/Sources/Ghostty/Ghostty.Config.swift
++++ b/macos/Sources/Ghostty/Ghostty.Config.swift
+@@ -349,6 +349,9 @@ extension Ghostty {
+         }
+ 
+         var macosTitlebarStyle: MacOSTitlebarStyle {
++            if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
++                return .hidden
++            }
+             let defaultValue = MacOSTitlebarStyle.transparent
+             guard let config = self.config else { return defaultValue }
+             var v: UnsafePointer<Int8>?
