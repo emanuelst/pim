@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,7 +31,21 @@ class Session:
 
     @property
     def label(self) -> str:
-        return self.name or self.title or "untitled session"
+        label = self.name or self.title or "untitled session"
+        return f"Command: {label}" if label.startswith("/") else label
+
+
+def age_label(timestamp: float) -> str:
+    seconds = max(0, time.time() - timestamp)
+    if seconds < 60:
+        return "now"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)}h"
+    if seconds < 604800:
+        return f"{int(seconds // 86400)}d"
+    return time.strftime("%b %d", time.localtime(timestamp))
 
 
 def read_session(path: Path) -> Session | None:
@@ -113,17 +128,6 @@ def respawn_pi(socket: str, pane: str, cwd: str, session_file: Path | None = Non
     tmux(socket, "select-pane", "-t", pane)
 
 
-def confirm(stdscr: curses.window, prompt: str) -> bool:
-    curses.echo()
-    try:
-        stdscr.addstr(0, 0, prompt + " [y/N] ")
-        stdscr.refresh()
-        answer = stdscr.getstr().decode(errors="replace").strip().lower()
-        return answer in {"y", "yes"}
-    finally:
-        curses.noecho()
-
-
 def ask(stdscr: curses.window, prompt: str) -> str:
     curses.echo()
     try:
@@ -134,19 +138,20 @@ def ask(stdscr: curses.window, prompt: str) -> str:
         curses.noecho()
 
 
-def flatten(items: list[Session]) -> tuple[list[tuple[str, str | Session]], list[int]]:
+def flatten(items: list[Session], current_cwd: str) -> list[tuple[str, str | Session]]:
     groups: dict[str, list[Session]] = {}
     for item in items:
         groups.setdefault(item.cwd, []).append(item)
 
     rows: list[tuple[str, str | Session]] = []
-    session_rows: list[int] = []
-    for cwd, group in sorted(groups.items(), key=lambda pair: max(s.updated for s in pair[1]), reverse=True):
+    groups = dict(sorted(
+        groups.items(),
+        key=lambda pair: (pair[0] != current_cwd, -max(s.updated for s in pair[1])),
+    ))
+    for cwd, group in groups.items():
         rows.append(("heading", cwd))
-        for item in group:
-            session_rows.append(len(rows))
-            rows.append(("session", item))
-    return rows, session_rows
+        rows.extend(("session", item) for item in group)
+    return rows
 
 
 def draw(
@@ -155,16 +160,17 @@ def draw(
     selected: int,
     active: Path | None,
     status: str,
+    current_cwd: str,
 ) -> dict[int, int]:
     stdscr.erase()
     height, width = stdscr.getmaxyx()
     row_map: dict[int, int] = {}
-    rows, session_rows = flatten(items)
+    rows = flatten(items, current_cwd)
     selected = max(0, min(selected, max(0, len(items) - 1)))
 
     try:
         stdscr.addnstr(0, 0, " PIM  sessions", width - 1, curses.A_BOLD)
-        stdscr.addnstr(1, 0, " n new   Enter switch   F6 focus   q quit", width - 1, curses.A_DIM)
+        stdscr.addnstr(1, 0, " n new   r rename   Enter switch   F6 focus   q quit", width - 1, curses.A_DIM)
     except curses.error:
         return row_map
 
@@ -190,12 +196,13 @@ def draw(
         row_map[screen_row] = session_index
         marker = ">" if item.file == selected_path else " "
         active_marker = " *" if active and item.file == active else "  "
-        text = f"{marker}{active_marker} {item.label}"
-        if item.title and not item.name:
-            text = f"{marker}{active_marker} {item.title}"
+        suffix = f" {age_label(item.updated)}"
+        available = max(1, width - 1)
+        label_width = max(1, available - len(suffix))
+        text = (f"{marker}{active_marker} {item.label}"[:label_width].ljust(label_width) + suffix)
         attr = curses.A_REVERSE if item.file == selected_path else curses.A_NORMAL
         try:
-            stdscr.addnstr(screen_row, 0, text, width - 1, attr)
+            stdscr.addnstr(screen_row, 0, text, available, attr)
         except curses.error:
             pass
         session_index += 1
@@ -208,6 +215,27 @@ def draw(
     return row_map
 
 
+def append_session_name(path: Path, name: str) -> None:
+    last_id = None
+    with path.open(encoding="utf-8") as stream:
+        for line in stream:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("id"):
+                last_id = entry["id"]
+    entry = {
+        "type": "session_info",
+        "id": uuid.uuid4().hex[:8],
+        "parentId": last_id,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+        "name": name,
+    }
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(entry) + "\n")
+
+
 def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str) -> None:
     active_item = next((item for item in sessions() if item.cwd == start_cwd), None)
     active: Path | None = active_item.file if active_item else None
@@ -217,22 +245,24 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
     def load() -> list[Session]:
         return sessions()
 
-    def switch(stdscr: curses.window, item: Session) -> tuple[Path | None, str]:
-        nonlocal active
+    def switch(item: Session) -> tuple[Path | None, str]:
         cwd = item.cwd if os.path.isdir(item.cwd) else start_cwd
         if not os.path.isdir(item.cwd):
             return active, f"Missing folder: {item.cwd}"
-        if active != item.file and not confirm(stdscr, "Stop current Pi and switch? "):
-            return active, "Switch cancelled"
         respawn_pi(socket, right_pane, cwd, item.file)
         return item.file, f"Switched to {item.label}"
 
     def new_session(stdscr: curses.window) -> tuple[Path | None, str]:
         name = ask(stdscr, "New session name (optional):")
-        if active and not confirm(stdscr, "Stop current Pi and start new session? "):
-            return active, "New session cancelled"
         respawn_pi(socket, right_pane, start_cwd, name=name or None)
         return None, "Started new session"
+
+    def rename_session(stdscr: curses.window, item: Session) -> str:
+        name = ask(stdscr, f"Rename '{item.label}':")
+        if not name:
+            return "Rename cancelled"
+        append_session_name(item.file, name)
+        return f"Renamed to {name}"
 
     def loop(stdscr: curses.window) -> None:
         nonlocal active, selected, status
@@ -250,7 +280,7 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
                 selected = min(selected, len(items) - 1)
             else:
                 selected = 0
-            row_map = draw(stdscr, items, selected, active, status)
+            row_map = draw(stdscr, items, selected, active, status, start_cwd)
             key = stdscr.getch()
 
             if key == -1:
@@ -263,10 +293,12 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
             elif key in (curses.KEY_DOWN, ord("j")) and items:
                 selected = (selected + 1) % len(items)
             elif key in (10, 13, curses.KEY_ENTER) and items:
-                active, status = switch(stdscr, items[selected])
+                active, status = switch(items[selected])
             elif key == ord("n"):
                 active, status = new_session(stdscr)
-            elif key in (ord("r"), curses.KEY_F5):
+            elif key == ord("r") and items:
+                status = rename_session(stdscr, items[selected])
+            elif key in (ord("R"), curses.KEY_F5):
                 status = "Session list refreshed"
             elif key == curses.KEY_MOUSE:
                 try:
@@ -275,7 +307,7 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
                         index = row_map.get(y)
                         if index is not None:
                             selected = index
-                            active, status = switch(stdscr, items[selected])
+                            active, status = switch(items[selected])
                 except curses.error:
                     pass
 
@@ -342,6 +374,8 @@ def self_test() -> None:
         assert item.cwd == "/tmp/project"
         assert item.label == "Widget fix"
         assert item.title == "Fix the widget"
+        append_session_name(path, "Renamed")
+        assert read_session(path).name == "Renamed"
     assert "pi" in pi_command("/tmp/project", Path("/tmp/a b.jsonl"))
     print("pim self-test: ok")
 
