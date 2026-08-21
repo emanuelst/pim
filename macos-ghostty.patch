@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..73b4a1e
+index 0000000..ce54c33
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1304 @@
+@@ -0,0 +1,1302 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -1150,11 +1150,6 @@ index 0000000..73b4a1e
 +                .help("New Chat")
 +            }
 +            .padding(.horizontal, 12)
-+            // Leave room for the traffic lights when the Pim content extends
-+            // into the transparent native titlebar.
-+            // Keep the sidebar heading clear of the traffic lights, sidebar
-+            // toggle, and search control in the native titlebar.
-+            .padding(.leading, 112)
 +            .padding(.vertical, 10)
 +
 +            List(selection: $selection) {
@@ -1190,6 +1185,9 @@ index 0000000..73b4a1e
 +                scheduleOpen(selection)
 +            }
 +        }
++        // Keep the sidebar's content below the native titlebar controls. The
++        // heading now belongs to the sidebar, not to the titlebar toolbar.
++        .padding(.top, 30)
 +        .frame(minWidth: 240, idealWidth: 300, maxWidth: 460)
 +        .alert("Rename Chat", isPresented: Binding(
 +            get: { renamingSession != nil },
