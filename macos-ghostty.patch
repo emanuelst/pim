@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..02acba3
+index 0000000..680cdfe
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,419 @@
+@@ -0,0 +1,420 @@
 +import Foundation
 +import SwiftUI
 +
@@ -369,6 +369,7 @@ index 0000000..02acba3
 +                    }
 +                .padding(.vertical, 1)
 +                .tag(session.id)
++                    .listRowBackground(Color.clear)
 +                    .contextMenu {
 +                        Button(store.isKeptActive(session) ? "Stop in Background" : "Keep Active") {
 +                            store.toggleKeptActive(session)
