@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..9fc9162
+index 0000000..47634ff
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,201 @@
+@@ -0,0 +1,238 @@
 +import Foundation
 +import SwiftUI
 +
@@ -27,11 +27,14 @@ index 0000000..9fc9162
 +@MainActor
 +final class PimSessionStore: ObservableObject {
 +    @Published private(set) var sessions: [PimSession] = []
++    @Published private var readAt: [String: TimeInterval]
 +    private var timer: Timer?
++    private static let readStateKey = "Pim.readAt"
 +    private var cache: [URL: (Date, PimSession)] = [:]
 +    private var refreshInFlight = false
 +
 +    init() {
++        readAt = UserDefaults.standard.dictionary(forKey: Self.readStateKey) as? [String: TimeInterval] ?? [:]
 +        refresh()
 +        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
 +            Task { @MainActor [weak self] in self?.refresh() }
@@ -40,6 +43,21 @@ index 0000000..9fc9162
 +
 +    deinit {
 +        timer?.invalidate()
++    }
++
++    func isUnread(_ session: PimSession) -> Bool {
++        guard let timestamp = readAt[session.id.path] else { return true }
++        return session.modified.timeIntervalSince1970 > timestamp
++    }
++
++    func markRead(_ session: PimSession) {
++        readAt[session.id.path] = Date().timeIntervalSince1970
++        UserDefaults.standard.set(readAt, forKey: Self.readStateKey)
++    }
++
++    func markUnread(_ session: PimSession) {
++        readAt.removeValue(forKey: session.id.path)
++        UserDefaults.standard.set(readAt, forKey: Self.readStateKey)
 +    }
 +
 +    func refresh() {
@@ -173,18 +191,37 @@ index 0000000..9fc9162
 +            .padding(.horizontal, 12)
 +            .padding(.vertical, 10)
 +
-+            List(store.sessions, selection: $selection) { session in
-+                VStack(alignment: .leading, spacing: 1) {
-+                    Text(session.displayName)
-+                        .font(.system(size: 13))
-+                        .lineLimit(1)
-+                    Text("\(ageLabel(session.modified)) · \(session.projectName)")
-+                        .font(.system(size: 11))
-+                        .foregroundStyle(.secondary)
-+                        .lineLimit(1)
++            List(selection: $selection) {
++                ForEach(store.sessions, id: \.id) { (session: PimSession) in
++                    HStack(spacing: 6) {
++                    VStack(alignment: .leading, spacing: 1) {
++                        Text(session.displayName)
++                            .font(.system(size: 13, weight: store.isUnread(session) ? .semibold : .regular))
++                            .lineLimit(1)
++                        Text("\(ageLabel(session.modified)) · \(session.projectName)")
++                            .font(.system(size: 11))
++                            .foregroundStyle(.secondary)
++                            .lineLimit(1)
++                    }
++                    Spacer(minLength: 0)
++                    if store.isUnread(session) {
++                        Circle()
++                            .fill(Color.accentColor)
++                            .frame(width: 6, height: 6)
++                    }
 +                }
 +                .padding(.vertical, 1)
 +                .tag(session.id)
++                    .contextMenu {
++                        Button(store.isUnread(session) ? "Mark as Read" : "Mark as Unread") {
++                            if store.isUnread(session) {
++                                store.markRead(session)
++                            } else {
++                                store.markUnread(session)
++                            }
++                        }
++                    }
++                }
 +            }
 +            .listStyle(.sidebar)
 +            .onSubmit {
@@ -206,7 +243,7 @@ index 0000000..9fc9162
 +    }
 +}
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..1bb8b84 100644
+index 340a0b4..65a3428 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -58,6 +58,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
@@ -282,7 +319,7 @@ index 340a0b4..1bb8b84 100644
      // MARK: - NSWindowController
  
      override func windowWillLoad() {
-@@ -1085,7 +1124,14 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1085,7 +1124,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
  
          // Initialize our content view to the SwiftUI root
          let container = TerminalViewContainer {
@@ -290,7 +327,10 @@ index 340a0b4..1bb8b84 100644
 +            HStack(spacing: 0) {
 +                PimSidebar(
 +                    store: pimSessionStore,
-+                    onOpen: { [weak self] session in self?.openPimSession(session) },
++                    onOpen: { [weak self] session in
++                        self?.pimSessionStore.markRead(session)
++                        self?.openPimSession(session)
++                    },
 +                    onNew: { [weak self] in self?.newPimChat() })
 +                Divider()
 +                TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
