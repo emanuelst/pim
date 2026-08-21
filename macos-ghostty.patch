@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..73a38cc
+index 0000000..aaa648d
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,600 @@
+@@ -0,0 +1,672 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -75,9 +75,13 @@ index 0000000..73a38cc
 +    @Published private(set) var activeStates: [URL: String] = [:]
 +    @Published private(set) var switchingTo: URL?
 +    @Published private var readAt: [String: TimeInterval]
++    @Published private var pinnedPaths: Set<String>
++    @Published private var customNames: [String: String]
 +    private var timer: Timer?
 +    private var statusTimer: Timer?
 +    private static let readStateKey = "Pim.readAt"
++    private static let pinnedKey = "Pim.pinned"
++    private static let customNamesKey = "Pim.customNames"
 +    private static let readStateInitializedKey = "Pim.readStateInitialized"
 +    private var needsInitialReadMigration: Bool
 +    private var cache: [URL: (Date, PimSession)] = [:]
@@ -86,6 +90,8 @@ index 0000000..73a38cc
 +
 +    init() {
 +        readAt = UserDefaults.standard.dictionary(forKey: Self.readStateKey) as? [String: TimeInterval] ?? [:]
++        pinnedPaths = Set(UserDefaults.standard.stringArray(forKey: Self.pinnedKey) ?? [])
++        customNames = UserDefaults.standard.dictionary(forKey: Self.customNamesKey) as? [String: String] ?? [:]
 +        needsInitialReadMigration = !UserDefaults.standard.bool(forKey: Self.readStateInitializedKey)
 +        refresh()
 +        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -114,6 +120,31 @@ index 0000000..73a38cc
 +    func markUnread(_ session: PimSession) {
 +        readAt.removeValue(forKey: session.id.path)
 +        UserDefaults.standard.set(readAt, forKey: Self.readStateKey)
++    }
++
++    func displayName(for session: PimSession) -> String {
++        customNames[session.id.path] ?? session.displayName
++    }
++
++    func isPinned(_ session: PimSession) -> Bool {
++        pinnedPaths.contains(session.id.path)
++    }
++
++    func togglePinned(_ session: PimSession) {
++        if !pinnedPaths.insert(session.id.path).inserted {
++            pinnedPaths.remove(session.id.path)
++        }
++        UserDefaults.standard.set(Array(pinnedPaths), forKey: Self.pinnedKey)
++    }
++
++    func rename(_ session: PimSession, to name: String) {
++        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
++        if trimmed.isEmpty {
++            customNames.removeValue(forKey: session.id.path)
++        } else {
++            customNames[session.id.path] = trimmed
++        }
++        UserDefaults.standard.set(customNames, forKey: Self.customNamesKey)
 +    }
 +
 +    func createNewSession(cwd: String) -> PimSession? {
@@ -453,6 +484,8 @@ index 0000000..73a38cc
 +    @ObservedObject var store: PimSessionStore
 +    @State private var selection: PimSession.ID?
 +    @State private var programmaticSelection: PimSession.ID?
++    @State private var renamingSession: PimSession.ID?
++    @State private var renameDraft = ""
 +    @AppStorage("Pim.superGlass") private var superGlass = false
 +    let onOpen: (PimSession) -> Void
 +    let onNew: () -> Void
@@ -481,65 +514,15 @@ index 0000000..73a38cc
 +            .padding(.vertical, 10)
 +
 +            List(selection: $selection) {
-+                ForEach(store.sessions, id: \.id) { (session: PimSession) in
-+                    VStack(alignment: .leading, spacing: 1) {
-+                        HStack(spacing: 5) {
-+                            Text(session.displayName)
-+                                .font(.system(size: 13, weight: store.isUnread(session) ? .semibold : .regular))
-+                                .lineLimit(1)
-+                            Spacer(minLength: 4)
-+                            Text(ageLabel(session.modified))
-+                                .font(.system(size: 11))
-+                                .foregroundStyle(.secondary)
-+                            if let state = store.activeStates[session.id] {
-+                                Circle()
-+                                    .fill(state == "working" ? Color.orange : Color.green)
-+                                    .frame(width: 6, height: 6)
-+                                    .accessibilityLabel(state == "working" ? "Working" : "Warm and idle")
-+                            } else {
-+                                Circle()
-+                                    .stroke(Color.secondary.opacity(0.55), lineWidth: 1)
-+                                    .frame(width: 6, height: 6)
-+                                    .accessibilityLabel("Cold")
-+                            }
-+                            if store.isUnread(session) {
-+                                Circle()
-+                                    .fill(Color.accentColor)
-+                                    .frame(width: 6, height: 6)
-+                                    .accessibilityLabel("Unread")
-+                            }
-+                        }
-+                        Text(session.projectName)
-+                            .font(.system(size: 11))
-+                            .foregroundStyle(.secondary)
-+                            .lineLimit(1)
-+                        if let model = session.nativeModelLabel {
-+                            HStack(spacing: 6) {
-+                                Text(model)
-+                                    .font(.system(size: 10, design: .monospaced))
-+                                    .foregroundStyle(.tertiary)
-+                                    .lineLimit(1)
-+                                    .truncationMode(.middle)
-+                                Spacer(minLength: 4)
-+                                Text(session.costLabel)
-+                                    .font(.system(size: 10, design: .monospaced))
-+                                    .foregroundStyle(.tertiary)
-+                                    .fixedSize()
-+                            }
-+                        }
++                let pinned = store.sessions.filter { store.isPinned($0) }
++                let recents = store.sessions.filter { !store.isPinned($0) }
++                if !pinned.isEmpty {
++                    Section("Pinned") {
++                        ForEach(pinned, id: \.id) { sessionRow($0) }
 +                    }
-+                    .contextMenu {
-+                        Button(store.isUnread(session) ? "Mark as Read" : "Mark as Unread") {
-+                            if store.isUnread(session) {
-+                                store.markRead(session)
-+                            } else {
-+                                store.markUnread(session)
-+                            }
-+                        }
-+                    }
-+                .padding(.vertical, 1)
-+                .tag(session.id)
-+                    .listRowBackground(Color.clear)
++                }
++                Section("Recents") {
++                    ForEach(recents, id: \.id) { sessionRow($0) }
 +                }
 +            }
 +            .listStyle(.sidebar)
@@ -584,6 +567,95 @@ index 0000000..73a38cc
 +            }
 +        }
 +        .frame(minWidth: 230, idealWidth: 260, maxWidth: 420)
++        .alert("Rename Chat", isPresented: Binding(
++            get: { renamingSession != nil },
++            set: { if !$0 { renamingSession = nil } }
++        )) {
++            TextField("Chat name", text: $renameDraft)
++            Button("Cancel", role: .cancel) { renamingSession = nil }
++            Button("Save") {
++                if let id = renamingSession,
++                   let session = store.sessions.first(where: { $0.id == id }) {
++                    store.rename(session, to: renameDraft)
++                }
++                renamingSession = nil
++            }
++        }
++    }
++
++    @ViewBuilder
++    private func sessionRow(_ session: PimSession) -> some View {
++        VStack(alignment: .leading, spacing: 1) {
++            HStack(spacing: 5) {
++                if store.isPinned(session) {
++                    Image(systemName: "pin.fill")
++                        .font(.system(size: 9))
++                        .foregroundStyle(.tertiary)
++                }
++                Text(store.displayName(for: session))
++                    .font(.system(size: 13, weight: store.isUnread(session) ? .semibold : .regular))
++                    .lineLimit(1)
++                Spacer(minLength: 4)
++                Text(ageLabel(session.modified))
++                    .font(.system(size: 11))
++                    .foregroundStyle(.secondary)
++                if let state = store.activeStates[session.id] {
++                    Circle()
++                        .fill(state == "working" ? Color.orange : Color.green)
++                        .frame(width: 6, height: 6)
++                        .accessibilityLabel(state == "working" ? "Working" : "Warm and idle")
++                } else {
++                    Circle()
++                        .stroke(Color.secondary.opacity(0.55), lineWidth: 1)
++                        .frame(width: 6, height: 6)
++                        .accessibilityLabel("Cold")
++                }
++                if store.isUnread(session) {
++                    Circle()
++                        .fill(Color.accentColor)
++                        .frame(width: 6, height: 6)
++                        .accessibilityLabel("Unread")
++                }
++            }
++            Text(session.projectName)
++                .font(.system(size: 11))
++                .foregroundStyle(.secondary)
++                .lineLimit(1)
++            if let model = session.nativeModelLabel {
++                HStack(spacing: 6) {
++                    Text(model)
++                        .font(.system(size: 10, design: .monospaced))
++                        .foregroundStyle(.tertiary)
++                        .lineLimit(1)
++                        .truncationMode(.middle)
++                    Spacer(minLength: 4)
++                    Text(session.costLabel)
++                        .font(.system(size: 10, design: .monospaced))
++                        .foregroundStyle(.tertiary)
++                        .fixedSize()
++                }
++            }
++        }
++        .contextMenu {
++            Button(store.isPinned(session) ? "Unpin" : "Pin") {
++                store.togglePinned(session)
++            }
++            Button("Rename…") {
++                renameDraft = store.displayName(for: session)
++                renamingSession = session.id
++            }
++            Divider()
++            Button(store.isUnread(session) ? "Mark as Read" : "Mark as Unread") {
++                if store.isUnread(session) {
++                    store.markRead(session)
++                } else {
++                    store.markUnread(session)
++                }
++            }
++        }
++        .padding(.vertical, 1)
++        .tag(session.id)
++        .listRowBackground(Color.clear)
 +    }
 +
 +    private func scheduleOpen(_ id: PimSession.ID?) {
