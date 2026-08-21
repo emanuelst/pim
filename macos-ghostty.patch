@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..c586890
+index 0000000..b8cdbc1
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,897 @@
+@@ -0,0 +1,910 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -538,10 +538,17 @@ index 0000000..c586890
 +    @Published var isVisible = true
 +}
 +
++private final class PimRoundSidebarButton: NSButton {
++    override func layout() {
++        super.layout()
++        layer?.cornerRadius = min(bounds.width, bounds.height) / 2
++    }
++}
++
 +@MainActor
 +final class PimSidebarAccessoryViewController: NSTitlebarAccessoryViewController {
 +    private let visibility: PimSidebarVisibility
-+    private let button = NSButton()
++    private let button = PimRoundSidebarButton()
 +
 +    init(visibility: PimSidebarVisibility) {
 +        self.visibility = visibility
@@ -560,10 +567,13 @@ index 0000000..c586890
 +
 +        button.translatesAutoresizingMaskIntoConstraints = false
 +        button.isBordered = false
-+        button.bezelStyle = .regularSquare
++        button.bezelStyle = .shadowlessSquare
++        button.focusRingType = .none
++        button.showsBorderOnlyWhileMouseInside = false
 +        button.wantsLayer = true
 +        button.layer?.backgroundColor = NSColor(calibratedWhite: 0.18, alpha: 0.88).cgColor
 +        button.layer?.cornerRadius = 18
++        button.layer?.masksToBounds = true
 +        button.layer?.borderWidth = 1
 +        button.layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
 +        button.contentTintColor = .white
@@ -687,6 +697,7 @@ index 0000000..c586890
 +    let delegate: (any TerminalViewDelegate)?
 +    @ObservedObject var appearance: PimTerminalAppearance
 +    @ObservedObject var sidebarVisibility: PimSidebarVisibility
++    @AppStorage("Pim.superGlass") private var superGlass = false
 +    let onOpen: (PimSession) -> Void
 +    let onNew: () -> Void
 +
@@ -705,6 +716,16 @@ index 0000000..c586890
 +                    PimLoadingOverlay(store: store)
 +                }
 +            }
++        }
++        .background {
++            // One native surface owns the sidebar and title background in
++            // normal mode. This avoids a transparent window when Super Glass
++            // is disabled and prevents a material seam at the split.
++            PimGlassBackground(superGlass: superGlass)
++                .id("workspace-glass-\(superGlass)")
++                .opacity(superGlass ? 1.0 : 0.75)
++                .ignoresSafeArea(.container, edges: .top)
++                .allowsHitTesting(false)
 +        }
 +    }
 +}
@@ -773,14 +794,6 @@ index 0000000..c586890
 +            }
 +            .onSubmit {
 +                scheduleOpen(selection)
-+            }
-+        }
-+        .background {
-+            if superGlass {
-+                PimGlassBackground(superGlass: true)
-+                    .id("super-glass-sidebar")
-+                    .ignoresSafeArea(.container, edges: .top)
-+                    .allowsHitTesting(false)
 +            }
 +        }
 +        .frame(minWidth: 240, idealWidth: 300, maxWidth: 460)
