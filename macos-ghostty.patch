@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..3a9b229
+index 0000000..bc6bcd6
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,371 @@
+@@ -0,0 +1,351 @@
 +import Foundation
 +import SwiftUI
 +
@@ -263,8 +263,6 @@ index 0000000..3a9b229
 +struct PimSidebar: View {
 +    @ObservedObject var store: PimSessionStore
 +    @State private var selection: PimSession.ID?
-+    @State private var width: CGFloat = 260
-+    @State private var dragStartWidth: CGFloat?
 +    let onOpen: (PimSession) -> Void
 +    let onNew: () -> Void
 +
@@ -333,37 +331,19 @@ index 0000000..3a9b229
 +                }
 +            }
 +            .listStyle(.sidebar)
++            .onChange(of: selection) { selection in
++                guard let selection,
++                      let session = store.sessions.first(where: { $0.id == selection }) else { return }
++                onOpen(session)
++            }
 +            .onSubmit {
 +                guard let selection,
 +                      let session = store.sessions.first(where: { $0.id == selection }) else { return }
 +                onOpen(session)
 +            }
 +        }
-+        .overlay(alignment: .trailing) {
-+            ZStack {
-+                Color.black.opacity(0.001)
-+                Rectangle()
-+                    .fill(Color(nsColor: .separatorColor))
-+                    .frame(width: 1)
-+            }
-+            .frame(width: 12)
-+            .contentShape(Rectangle())
-+            .highPriorityGesture(
-+                DragGesture()
-+                        .onChanged { value in
-+                            if dragStartWidth == nil { dragStartWidth = width }
-+                            width = min(420, max(220, dragStartWidth! + value.translation.width))
-+                        }
-+                        .onEnded { _ in
-+                            UserDefaults.standard.set(width, forKey: "Pim.sidebarWidth")
-+                            dragStartWidth = nil
-+                        })
-+        }
-+        .frame(width: width)
-+        .onAppear {
-+            let saved = UserDefaults.standard.double(forKey: "Pim.sidebarWidth")
-+            if saved > 0 { width = min(420, max(220, saved)) }
-+        }
++        .background(.regularMaterial)
++        .frame(minWidth: 230, idealWidth: 260, maxWidth: 420)
 +    }
 +
 +    private func ageLabel(_ date: Date) -> String {
@@ -376,7 +356,7 @@ index 0000000..3a9b229
 +    }
 +}
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..65a3428 100644
+index 340a0b4..74abf78 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -58,6 +58,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
@@ -452,12 +432,12 @@ index 340a0b4..65a3428 100644
      // MARK: - NSWindowController
  
      override func windowWillLoad() {
-@@ -1085,7 +1124,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1085,7 +1124,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
  
          // Initialize our content view to the SwiftUI root
          let container = TerminalViewContainer {
 -            TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
-+            HStack(spacing: 0) {
++            HSplitView {
 +                PimSidebar(
 +                    store: pimSessionStore,
 +                    onOpen: { [weak self] session in
@@ -465,7 +445,6 @@ index 340a0b4..65a3428 100644
 +                        self?.openPimSession(session)
 +                    },
 +                    onNew: { [weak self] in self?.newPimChat() })
-+                Divider()
 +                TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
 +            }
          }
