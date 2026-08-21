@@ -31,8 +31,7 @@ class Session:
 
     @property
     def label(self) -> str:
-        label = self.name or self.title or "untitled session"
-        return f"Command: {label}" if label.startswith("/") else label
+        return self.name or self.title or "untitled session"
 
 
 def age_label(timestamp: float) -> str:
@@ -198,8 +197,11 @@ def draw(
         active_marker = " *" if active and item.file == active else "  "
         suffix = f" {age_label(item.updated)}"
         available = max(1, width - 1)
+        label = item.label
+        if len(label) > 56:
+            label = label[:53] + "..."
         label_width = max(1, available - len(suffix))
-        text = (f"{marker}{active_marker} {item.label}"[:label_width].ljust(label_width) + suffix)
+        text = (f"{marker}{active_marker} {label}"[:label_width].ljust(label_width) + suffix)
         attr = curses.A_REVERSE if item.file == selected_path else curses.A_NORMAL
         try:
             stdscr.addnstr(screen_row, 0, text, available, attr)
@@ -307,7 +309,7 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
                         index = row_map.get(y)
                         if index is not None:
                             selected = index
-                            active, status = switch(items[selected])
+                            status = f"Selected {items[selected].label}; press Enter to switch"
                 except curses.error:
                     pass
 
