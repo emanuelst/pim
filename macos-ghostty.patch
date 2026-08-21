@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..b8cdbc1
+index 0000000..4e0b449
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,910 @@
+@@ -0,0 +1,896 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -538,17 +538,10 @@ index 0000000..b8cdbc1
 +    @Published var isVisible = true
 +}
 +
-+private final class PimRoundSidebarButton: NSButton {
-+    override func layout() {
-+        super.layout()
-+        layer?.cornerRadius = min(bounds.width, bounds.height) / 2
-+    }
-+}
-+
 +@MainActor
 +final class PimSidebarAccessoryViewController: NSTitlebarAccessoryViewController {
 +    private let visibility: PimSidebarVisibility
-+    private let button = PimRoundSidebarButton()
++    private let button = NSButton()
 +
 +    init(visibility: PimSidebarVisibility) {
 +        self.visibility = visibility
@@ -562,21 +555,14 @@ index 0000000..b8cdbc1
 +    }
 +
 +    override func loadView() {
-+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 48, height: 44))
-+        preferredContentSize = NSSize(width: 48, height: 44)
++        let container = NSView(frame: NSRect(x: 0, y: 0, width: 36, height: 32))
++        preferredContentSize = NSSize(width: 36, height: 32)
 +
 +        button.translatesAutoresizingMaskIntoConstraints = false
-+        button.isBordered = false
-+        button.bezelStyle = .shadowlessSquare
++        button.isBordered = true
++        button.bezelStyle = .texturedRounded
 +        button.focusRingType = .none
-+        button.showsBorderOnlyWhileMouseInside = false
-+        button.wantsLayer = true
-+        button.layer?.backgroundColor = NSColor(calibratedWhite: 0.18, alpha: 0.88).cgColor
-+        button.layer?.cornerRadius = 18
-+        button.layer?.masksToBounds = true
-+        button.layer?.borderWidth = 1
-+        button.layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
-+        button.contentTintColor = .white
++        button.showsBorderOnlyWhileMouseInside = true
 +        button.imageScaling = .scaleProportionallyDown
 +        button.target = self
 +        button.action = #selector(toggleSidebar)
@@ -586,8 +572,8 @@ index 0000000..b8cdbc1
 +        NSLayoutConstraint.activate([
 +            button.centerXAnchor.constraint(equalTo: container.centerXAnchor),
 +            button.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-+            button.widthAnchor.constraint(equalToConstant: 36),
-+            button.heightAnchor.constraint(equalToConstant: 36),
++            button.widthAnchor.constraint(equalToConstant: 28),
++            button.heightAnchor.constraint(equalToConstant: 28),
 +        ])
 +        view = container
 +        updateButton()
