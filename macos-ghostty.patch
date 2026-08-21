@@ -1,3 +1,40 @@
+diff --git a/macos/Sources/App/MainMenu.xib b/macos/Sources/App/MainMenu.xib
+index aab8f1f..b91a7c2 100644
+--- a/macos/Sources/App/MainMenu.xib
++++ b/macos/Sources/App/MainMenu.xib
+@@ -77,11 +77,11 @@
+         <customObject id="YLy-65-1bz" customClass="NSFontManager"/>
+         <menu title="Main Menu" systemMenu="main" id="AYu-sK-qS6">
+             <items>
+-                <menuItem title="Ghostty" id="1Xt-HY-uBw">
++                <menuItem title="Pim" id="1Xt-HY-uBw">
+                     <modifierMask key="keyEquivalentModifierMask"/>
+-                    <menu key="submenu" title="Ghostty" systemMenu="apple" id="uQy-DD-JDr">
++                    <menu key="submenu" title="Pim" systemMenu="apple" id="uQy-DD-JDr">
+                         <items>
+-                            <menuItem title="About Ghostty" id="5kV-Vb-QxS">
++                            <menuItem title="About Pim" id="5kV-Vb-QxS">
+                                 <modifierMask key="keyEquivalentModifierMask"/>
+                                 <connections>
+                                     <action selector="showAbout:" target="-1" id="tGt-68-tLn"/>
+@@ -124,7 +124,7 @@
+                                 <menu key="submenu" title="Services" id="aQe-vS-j8Q"/>
+                             </menuItem>
+                             <menuItem isSeparatorItem="YES" id="qno-yg-pur"/>
+-                            <menuItem title="Hide Ghostty" keyEquivalent="h" id="Olw-nP-bQN">
++                            <menuItem title="Hide Pim" keyEquivalent="h" id="Olw-nP-bQN">
+                                 <connections>
+                                     <action selector="hide:" target="-1" id="PnN-Uc-m68"/>
+                                 </connections>
+@@ -142,7 +142,7 @@
+                                 </connections>
+                             </menuItem>
+                             <menuItem isSeparatorItem="YES" id="kCx-OE-vgT"/>
+-                            <menuItem title="Quit Ghostty" id="4sb-4s-VLi">
++                            <menuItem title="Quit Pim" id="4sb-4s-VLi">
+                                 <modifierMask key="keyEquivalentModifierMask"/>
+                                 <connections>
+                                     <action selector="terminate:" target="-1" id="Te7-pn-YzF"/>
 diff --git a/macos/Sources/Features/About/AboutController.swift b/macos/Sources/Features/About/AboutController.swift
 index ace9205..2ef2591 100644
 --- a/macos/Sources/Features/About/AboutController.swift
