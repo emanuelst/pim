@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..c9c177b
+index 0000000..ce82f78
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,609 @@
+@@ -0,0 +1,575 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -411,43 +411,28 @@ index 0000000..c9c177b
 +    }
 +}
 +
-+private struct PimWindowAppearance: NSViewRepresentable {
++private struct PimGlassBackground: NSViewRepresentable {
 +    let superGlass: Bool
 +
-+    func makeNSView(context: Context) -> NSView {
-+        NSView()
-+    }
-+
-+    func updateNSView(_ nsView: NSView, context: Context) {
-+        let apply = {
-+            guard let window = nsView.window else { return }
-+            window.isOpaque = !superGlass
-+            window.backgroundColor = superGlass ? .clear : .windowBackgroundColor
-+            window.hasShadow = true
-+        }
-+        if nsView.window == nil {
-+            DispatchQueue.main.async(execute: apply)
-+        } else {
-+            apply()
-+        }
-+    }
-+}
-+
-+private struct PimSuperGlassBackground: NSViewRepresentable {
 +    func makeNSView(context: Context) -> NSVisualEffectView {
-+        let view = NSVisualEffectView()
-+        // Use the window-behind material so the effect can actually reveal
-+        // the desktop/window behind Pim instead of only tinting the sidebar.
-+        view.material = .underWindowBackground
-+        view.blendingMode = .behindWindow
-+        view.state = .active
-+        return view
++        NSVisualEffectView()
 +    }
 +
-+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-+        guard let window = nsView.window else { return }
-+        window.isOpaque = false
-+        window.backgroundColor = .clear
++    func updateNSView(_ view: NSVisualEffectView, context: Context) {
++        if superGlass {
++            // The easter egg deliberately uses the window-behind material.
++            view.material = .underWindowBackground
++            view.blendingMode = .behindWindow
++        } else {
++            // Normal mode is a single native sidebar material—no second
++            // transparent layer and no stale window appearance state.
++            view.material = .sidebar
++            view.blendingMode = .withinWindow
++        }
++        view.state = .active
++        guard let window = view.window else { return }
++        window.isOpaque = !superGlass
++        window.backgroundColor = superGlass ? .clear : .windowBackgroundColor
 +        window.hasShadow = true
 +    }
 +}
@@ -568,29 +553,10 @@ index 0000000..c9c177b
 +            }
 +        }
 +        .background {
-+            ZStack {
-+                PimWindowAppearance(superGlass: superGlass)
-+                    .allowsHitTesting(false)
-+                if superGlass {
-+                PimSuperGlassBackground()
-+                    .opacity(0.75)
-+                    .ignoresSafeArea(.container, edges: .top)
-+                    .allowsHitTesting(false)
-+            } else {
-+#if compiler(>=6.2)
-+                if #available(macOS 26.0, *) {
-+                    Color(nsColor: .windowBackgroundColor)
-+                        .opacity(0.5)
-+                        .glassEffect(.clear, in: Rectangle())
-+                        .ignoresSafeArea(.container, edges: .top)
-+                } else {
-+                    Color(nsColor: .windowBackgroundColor)
-+                }
-+#else
-+                Color(nsColor: .windowBackgroundColor)
-+#endif
-+                }
-+            }
++            PimGlassBackground(superGlass: superGlass)
++                .opacity(superGlass ? 0.75 : 0.5)
++                .ignoresSafeArea(.container, edges: .top)
++                .allowsHitTesting(false)
 +        }
 +        .frame(minWidth: 230, idealWidth: 260, maxWidth: 420)
 +    }
