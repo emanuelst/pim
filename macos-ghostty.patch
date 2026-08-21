@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..7648cf0
+index 0000000..cc2cb36
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,429 @@
+@@ -0,0 +1,443 @@
 +import Foundation
 +import SwiftUI
 +
@@ -29,12 +29,16 @@ index 0000000..7648cf0
 +        return name.isEmpty ? cwd : name
 +    }
 +
-+    var nativeStatusLabel: String? {
++    var nativeModelLabel: String? {
 +        guard let model else { return nil }
 +        let provider = provider.map { "(\($0)) " } ?? ""
 +        let level = thinkingLevel == nil || thinkingLevel == "off" ? "thinking off" : thinkingLevel!
-+        let subscription = self.provider == "openai-codex" ? " (sub)" : ""
-+        return "$\(String(format: "%.3f", totalCost))\(subscription)   \(provider)\(model) • \(level)"
++        return "\(provider)\(model) • \(level)"
++    }
++
++    var costLabel: String {
++        let subscription = provider == "openai-codex" ? " (sub)" : ""
++        return "$\(String(format: "%.3f", totalCost))\(subscription)"
 +    }
 +}
 +
@@ -374,12 +378,19 @@ index 0000000..7648cf0
 +                            .font(.system(size: 11))
 +                            .foregroundStyle(.secondary)
 +                            .lineLimit(1)
-+                        if let status = session.nativeStatusLabel {
-+                            Text(status)
-+                                .font(.system(size: 10, design: .monospaced))
-+                                .foregroundStyle(.tertiary)
-+                                .lineLimit(1)
-+                                .truncationMode(.middle)
++                        if let model = session.nativeModelLabel {
++                            HStack(spacing: 6) {
++                                Text(model)
++                                    .font(.system(size: 10, design: .monospaced))
++                                    .foregroundStyle(.tertiary)
++                                    .lineLimit(1)
++                                    .truncationMode(.middle)
++                                Spacer(minLength: 4)
++                                Text(session.costLabel)
++                                    .font(.system(size: 10, design: .monospaced))
++                                    .foregroundStyle(.tertiary)
++                                    .fixedSize()
++                            }
 +                        }
 +                    }
 +                .padding(.vertical, 1)
@@ -390,7 +401,10 @@ index 0000000..7648cf0
 +            .listStyle(.sidebar)
 +            .scrollContentBackground(.hidden)
 +            .onChange(of: store.activeSession) { activeSession in
-+                if let activeSession { selection = activeSession }
++                guard let activeSession else { return }
++                DispatchQueue.main.async {
++                    if selection != activeSession { selection = activeSession }
++                }
 +            }
 +            .onChange(of: selection) { selection in
 +                scheduleOpen(selection)
