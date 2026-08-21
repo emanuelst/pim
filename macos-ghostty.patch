@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..fb715c1
+index 0000000..0740cfe
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,536 @@
+@@ -0,0 +1,562 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -366,6 +366,28 @@ index 0000000..fb715c1
 +    }
 +}
 +
++private struct PimWindowAppearance: NSViewRepresentable {
++    let superGlass: Bool
++
++    func makeNSView(context: Context) -> NSView {
++        NSView()
++    }
++
++    func updateNSView(_ nsView: NSView, context: Context) {
++        let apply = {
++            guard let window = nsView.window else { return }
++            window.isOpaque = !superGlass
++            window.backgroundColor = superGlass ? .clear : .windowBackgroundColor
++            window.hasShadow = true
++        }
++        if nsView.window == nil {
++            DispatchQueue.main.async(execute: apply)
++        } else {
++            apply()
++        }
++    }
++}
++
 +private struct PimSuperGlassBackground: NSViewRepresentable {
 +    func makeNSView(context: Context) -> NSVisualEffectView {
 +        let view = NSVisualEffectView()
@@ -500,7 +522,10 @@ index 0000000..fb715c1
 +            }
 +        }
 +        .background {
-+            if superGlass {
++            ZStack {
++                PimWindowAppearance(superGlass: superGlass)
++                    .allowsHitTesting(false)
++                if superGlass {
 +                PimSuperGlassBackground()
 +                    .opacity(0.24)
 +                    .ignoresSafeArea(.container, edges: .top)
@@ -517,6 +542,7 @@ index 0000000..fb715c1
 +#else
 +                Color(nsColor: .windowBackgroundColor)
 +#endif
++                }
 +            }
 +        }
 +        .frame(minWidth: 230, idealWidth: 260, maxWidth: 420)
