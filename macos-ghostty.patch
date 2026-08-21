@@ -595,6 +595,37 @@ index 340a0b4..4f09d45 100644
  
          // If we have a default size, we want to apply it.
          if let defaultSize {
+diff --git a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
+index d907db9..d18ba5d 100644
+--- a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift	
++++ b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift	
+@@ -55,10 +55,12 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
+         titleVisibility = .hidden
+         titlebarAppearsTransparent = true
+ 
+-        // Hide the traffic lights (window control buttons)
+-        standardWindowButton(.closeButton)?.isHidden = true
+-        standardWindowButton(.miniaturizeButton)?.isHidden = true
+-        standardWindowButton(.zoomButton)?.isHidden = true
++        let isPim = Bundle.main.bundleURL.lastPathComponent == "Pim.app"
++        if !isPim {
++            standardWindowButton(.closeButton)?.isHidden = true
++            standardWindowButton(.miniaturizeButton)?.isHidden = true
++            standardWindowButton(.zoomButton)?.isHidden = true
++        }
+ 
+         // Disallow tabbing if the titlebar is hidden, since that will (should) also hide the tab bar.
+         tabbingMode = .disallowed
+@@ -66,7 +68,8 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
+         // Nuke it from orbit -- hide the titlebar container entirely, just in case. There are
+         // some operations that appear to bring back the titlebar visibility so this ensures
+         // it is gone forever.
+-        if let themeFrame = contentView?.superview,
++        if !isPim,
++           let themeFrame = contentView?.superview,
+            let titleBarContainer = themeFrame.firstDescendant(withClassName: "NSTitlebarContainerView") {
+             titleBarContainer.isHidden = true
+         }
 diff --git a/macos/Sources/Ghostty/Ghostty.Config.swift b/macos/Sources/Ghostty/Ghostty.Config.swift
 index bfe42b1..1c8aca7 100644
 --- a/macos/Sources/Ghostty/Ghostty.Config.swift
