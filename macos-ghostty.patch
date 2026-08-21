@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..97199c5
+index 0000000..bf4f3c4
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,586 @@
+@@ -0,0 +1,587 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -565,6 +565,7 @@ index 0000000..97199c5
 +        }
 +        .background {
 +            PimGlassBackground(superGlass: superGlass)
++                .id(superGlass)
 +                .opacity(superGlass ? 0.75 : 0.5)
 +                .ignoresSafeArea(.container, edges: .top)
 +                .allowsHitTesting(false)
