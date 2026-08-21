@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..34fd11f
+index 0000000..97199c5
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,574 @@
+@@ -0,0 +1,586 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -78,12 +78,15 @@ index 0000000..34fd11f
 +    private var timer: Timer?
 +    private var statusTimer: Timer?
 +    private static let readStateKey = "Pim.readAt"
++    private static let readStateInitializedKey = "Pim.readStateInitialized"
++    private var needsInitialReadMigration: Bool
 +    private var cache: [URL: (Date, PimSession)] = [:]
 +    private var refreshInFlight = false
 +    private var requestedActiveSession: URL?
 +
 +    init() {
 +        readAt = UserDefaults.standard.dictionary(forKey: Self.readStateKey) as? [String: TimeInterval] ?? [:]
++        needsInitialReadMigration = !UserDefaults.standard.bool(forKey: Self.readStateInitializedKey)
 +        refresh()
 +        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
 +            Task { @MainActor [weak self] in self?.refresh() }
@@ -169,6 +172,15 @@ index 0000000..34fd11f
 +                self.cache = cache
 +                if self.sessions != sessions {
 +                    self.sessions = sessions
++                }
++                if self.needsInitialReadMigration && !sessions.isEmpty {
++                    let now = Date().timeIntervalSince1970
++                    for session in sessions {
++                        self.readAt[session.id.path] = now
++                    }
++                    UserDefaults.standard.set(self.readAt, forKey: Self.readStateKey)
++                    UserDefaults.standard.set(true, forKey: Self.readStateInitializedKey)
++                    self.needsInitialReadMigration = false
 +                }
 +                self.refreshInFlight = false
 +            }
@@ -455,7 +467,7 @@ index 0000000..34fd11f
 +                    superGlass.toggle()
 +                } label: {
 +                    Image(systemName: "wand.and.stars")
-+                        .foregroundStyle(superGlass ? Color.accentColor : .secondary)
++                        .foregroundStyle(superGlass ? Color.secondary : Color.accentColor)
 +                }
 +                .buttonStyle(.borderless)
 +                .help(superGlass ? "Turn Off Super Glass" : "Super Glass")
