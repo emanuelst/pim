@@ -32,7 +32,7 @@ new file mode 100644
 index 0000000..99adb20
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1406 @@
+@@ -0,0 +1,1433 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -565,6 +565,33 @@ index 0000000..99adb20
 +    static func shellCommand() -> String {
 +        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
 +        return "\(quote(shell)) -l"
++    }
++
++    /// GUI-launched macOS apps do not inherit the user's shell PATH. The pnpm
++    /// pi shim invokes `node` by name, so provide the usual Node/package paths
++    /// explicitly to every Pi child.
++    static func childEnvironment() -> [String: String] {
++        let environment = ProcessInfo.processInfo.environment
++        let home = FileManager.default.homeDirectoryForCurrentUser.path
++        let fallback = [
++            "\(home)/Library/pnpm/bin",
++            "\(home)/Library/pnpm",
++            "\(home)/.bun/bin",
++            "/opt/homebrew/bin",
++            "/opt/homebrew/sbin",
++            "/usr/local/bin",
++            "/usr/local/sbin",
++            "/usr/bin",
++            "/bin",
++            "/usr/sbin",
++            "/sbin",
++        ]
++        let existing = environment["PATH"]?.split(separator: ":").map(String.init) ?? []
++        var paths: [String] = []
++        for path in fallback + existing where !paths.contains(path) {
++            paths.append(path)
++        }
++        return ["PATH": paths.joined(separator: ":")]
 +    }
 +
 +    static func workspaceDirectory() -> String {
@@ -1581,7 +1608,7 @@ index 340a0b4..5295e7e 100644
          terminalViewContainer?.ghosttyConfigDidChange(ghostty.config, preferredBackgroundColor: window.preferredBackgroundColor)
      }
 
-@@ -1051,6 +1093,151 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1093,153 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
 
@@ -1618,6 +1645,7 @@ index 340a0b4..5295e7e 100644
 +        var config = Ghostty.SurfaceConfiguration()
 +        config.workingDirectory = session.cwd
 +        config.command = PimSessionStore.launchCommand(for: session)
++        config.environmentVariables = PimSessionStore.childEnvironment()
 +        return Ghostty.SurfaceView(app, baseConfig: config)
 +    }
 +
@@ -1713,6 +1741,7 @@ index 340a0b4..5295e7e 100644
 +        var config = Ghostty.SurfaceConfiguration()
 +        config.workingDirectory = session.cwd
 +        config.command = PimSessionStore.launchCommand(for: session)
++        config.environmentVariables = PimSessionStore.childEnvironment()
 +        retainCurrentPimSurfaceIfNeeded()
 +        let view = Ghostty.SurfaceView(ghosttyApp, baseConfig: config)
 +        pimSurfaces[session.id] = view
@@ -1733,7 +1762,7 @@ index 340a0b4..5295e7e 100644
      // MARK: - NSWindowController
 
      override func windowWillLoad() {
-@@ -1061,6 +1248,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1061,6 +1250,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      override func windowDidLoad() {
          super.windowDidLoad()
          guard let window else { return }
@@ -1741,7 +1770,7 @@ index 340a0b4..5295e7e 100644
 
          // I copy this because we may change the source in the future but also because
          // I regularly audit our codebase for "ghostty.config" access because generally
-@@ -1068,6 +1256,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1068,6 +1258,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          // use whatever the latest app-level config is.
          let config = ghostty.config
 
@@ -1754,7 +1783,7 @@ index 340a0b4..5295e7e 100644
          // Setting all three of these is required for restoration to work.
          window.isRestorable = restorable
          if restorable {
-@@ -1083,9 +1277,36 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1083,9 +1279,36 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              focusedSurface = view
          }
 
@@ -1792,7 +1821,7 @@ index 340a0b4..5295e7e 100644
          }
 
          // Set the initial content size on the container so that
-@@ -1095,7 +1316,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1318,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
 
          window.contentView = container
