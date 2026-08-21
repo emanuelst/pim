@@ -73,5 +73,3 @@ The prototype requires `tmux` and Pi on `PATH`.
 ## Data and privacy
 
 Pim reads sessions from Pi's local agent directory and does not upload conversation data. Be careful when sharing screenshots: terminal contents and session titles may contain private information.
-
-For a clean demo environment, a separate macOS user account is preferable to a virtual machine. It provides a real native macOS window without exposing your personal `~/.pi` data. A future demo fixture mode can populate that account with synthetic Pi session JSONL files and a stub Pi executable.
