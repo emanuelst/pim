@@ -66,10 +66,10 @@ index ace9205..2ef2591 100644
      func hide() {
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..fecbb1c
+index 0000000..dfa5439
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1440 @@
+@@ -0,0 +1,1509 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -163,7 +163,19 @@ index 0000000..fecbb1c
 +    let modified: Date
 +
 +    var displayName: String {
-+        name ?? title ?? "New chat"
++        if let name, !Self.isPlaceholderName(name) {
++            return name
++        }
++        return title ?? "New Chat"
++    }
++
++    private static func isPlaceholderName(_ name: String) -> Bool {
++        switch name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
++        case "", "new chat", "new conversation", "untitled":
++            return true
++        default:
++            return false
++        }
 +    }
 +
 +    var projectName: String {
@@ -721,8 +733,8 @@ index 0000000..fecbb1c
 +                } else {
 +                    ""
 +                }
-+                if !text.isEmpty {
-+                    title = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
++                if !text.isEmpty, title == nil {
++                    title = autoTitle(from: text)
 +                }
 +            }
 +        }
@@ -740,6 +752,63 @@ index 0000000..fecbb1c
 +            contextTokens: contextTokens,
 +            contextWindow: contextWindows["\(usedProvider ?? provider ?? "")/\(usedModel ?? model ?? "")"] ?? 0,
 +            modified: modified)
++    }
++
++    private nonisolated static func autoTitle(from text: String) -> String? {
++        var proseLines: [String] = []
++        var inCodeBlock = false
++
++        for rawLine in text.components(separatedBy: .newlines) {
++            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
++            if line.hasPrefix("```") {
++                inCodeBlock.toggle()
++                continue
++            }
++            if !inCodeBlock, !line.isEmpty {
++                proseLines.append(line)
++            }
++        }
++
++        var candidate = (proseLines.isEmpty ? text : proseLines.joined(separator: " "))
++            .split(whereSeparator: { $0.isWhitespace })
++            .joined(separator: " ")
++            .trimmingCharacters(in: .whitespacesAndNewlines)
++        guard !candidate.isEmpty else { return nil }
++
++        while candidate.hasPrefix("#") {
++            candidate.removeFirst()
++            candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
++        }
++
++        let lowercased = candidate.lowercased()
++        for prefix in [
++            "can you ", "could you ", "please ", "help me ",
++            "i need help with ", "i need you to ", "i want you to "
++        ] where lowercased.hasPrefix(prefix) {
++            candidate.removeFirst(prefix.count)
++            candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
++            break
++        }
++
++        if let end = candidate.firstIndex(where: { ".!?".contains($0) }) {
++            candidate = String(candidate[..<end])
++        }
++        while let last = candidate.last, ".!?".contains(last) {
++            candidate.removeLast()
++        }
++        guard !candidate.isEmpty else { return nil }
++
++        let maxLength = 56
++        var shortened = ""
++        for word in candidate.split(separator: " ") {
++            let next = shortened.isEmpty ? String(word) : shortened + " " + word
++            if next.count > maxLength { break }
++            shortened = next
++        }
++        if shortened.isEmpty {
++            shortened = String(candidate.prefix(maxLength))
++        }
++        return shortened == candidate ? shortened : shortened + "…"
 +    }
 +
 +    private nonisolated static func modelContextWindows() -> [String: Int] {
