@@ -1,9 +1,10 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..8689f80
+index 0000000..3ae6c3e
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,488 @@
+@@ -0,0 +1,517 @@
++import AppKit
 +import Foundation
 +import SwiftUI
 +
@@ -346,10 +347,23 @@ index 0000000..8689f80
 +    }
 +}
 +
++private struct PimSuperGlassBackground: NSViewRepresentable {
++    func makeNSView(context: Context) -> NSVisualEffectView {
++        let view = NSVisualEffectView()
++        view.material = .sidebar
++        view.blendingMode = .withinWindow
++        view.state = .active
++        return view
++    }
++
++    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
++}
++
 +struct PimSidebar: View {
 +    @ObservedObject var store: PimSessionStore
 +    @State private var selection: PimSession.ID?
 +    @State private var programmaticSelection: PimSession.ID?
++    @AppStorage("Pim.superGlass") private var superGlass = false
 +    let onOpen: (PimSession) -> Void
 +    let onNew: () -> Void
 +
@@ -366,6 +380,14 @@ index 0000000..8689f80
 +                        .foregroundStyle(.secondary)
 +                }
 +                Spacer()
++                Button {
++                    superGlass.toggle()
++                } label: {
++                    Image(systemName: "wand.and.stars")
++                        .foregroundStyle(superGlass ? Color.accentColor : .secondary)
++                }
++                .buttonStyle(.borderless)
++                .help(superGlass ? "Turn Off Super Glass" : "Super Glass")
 +                Button(action: onNew) {
 +                    Image(systemName: "plus")
 +                }
@@ -459,17 +481,24 @@ index 0000000..8689f80
 +            }
 +        }
 +        .background {
-+#if compiler(>=6.2)
-+            if #available(macOS 26.0, *) {
-+                Color.clear
-+                    .glassEffect(.clear, in: Rectangle())
++            if superGlass {
++                PimSuperGlassBackground()
++                    .opacity(0.72)
 +                    .ignoresSafeArea(.container, edges: .top)
++                    .allowsHitTesting(false)
 +            } else {
-+                Color(nsColor: .windowBackgroundColor)
-+            }
++#if compiler(>=6.2)
++                if #available(macOS 26.0, *) {
++                    Color.clear
++                        .glassEffect(.clear, in: Rectangle())
++                        .ignoresSafeArea(.container, edges: .top)
++                } else {
++                    Color(nsColor: .windowBackgroundColor)
++                }
 +#else
-+            Color(nsColor: .windowBackgroundColor)
++                Color(nsColor: .windowBackgroundColor)
 +#endif
++            }
 +        }
 +        .frame(minWidth: 230, idealWidth: 260, maxWidth: 420)
 +    }
