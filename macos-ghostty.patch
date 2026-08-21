@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..2adb812
+index 0000000..7648cf0
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,428 @@
+@@ -0,0 +1,429 @@
 +import Foundation
 +import SwiftUI
 +
@@ -33,7 +33,8 @@ index 0000000..2adb812
 +        guard let model else { return nil }
 +        let provider = provider.map { "(\($0)) " } ?? ""
 +        let level = thinkingLevel == nil || thinkingLevel == "off" ? "thinking off" : thinkingLevel!
-+        return "\(provider)\(model) • \(level)"
++        let subscription = self.provider == "openai-codex" ? " (sub)" : ""
++        return "$\(String(format: "%.3f", totalCost))\(subscription)   \(provider)\(model) • \(level)"
 +    }
 +}
 +
