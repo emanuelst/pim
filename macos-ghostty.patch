@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..b0ec194
+index 0000000..49ca6a3
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,756 @@
+@@ -0,0 +1,767 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -504,7 +504,18 @@ index 0000000..b0ec194
 +            visual.blendingMode = .withinWindow
 +            visual.state = .active
 +        }
-+        guard let window = view.window else { return }
++        Self.configureWindow(view.window)
++        // SwiftUI can call updateNSView before the representable is attached
++        // to the window. Reapply once attachment and Ghostty's initial window
++        // sync have completed so a fresh launch matches a later toggle.
++        DispatchQueue.main.async { [weak view] in
++            guard let view else { return }
++            Self.configureWindow(view.window)
++        }
++    }
++
++    private static func configureWindow(_ window: NSWindow?) {
++        guard let window else { return }
 +        // Keep the window transparent in both modes so toggling does not
 +        // create a third intermediate appearance.
 +        window.isOpaque = false
