@@ -1,12 +1,13 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..1d09dcc
+index 0000000..fb715c1
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,517 @@
+@@ -0,0 +1,536 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
++import Darwin
 +
 +final class PimWindowDragView: NSView {
 +    override func mouseDown(with event: NSEvent) {
@@ -75,6 +76,7 @@ index 0000000..1d09dcc
 +    @Published private(set) var switchingTo: URL?
 +    @Published private var readAt: [String: TimeInterval]
 +    private var timer: Timer?
++    private var statusTimer: Timer?
 +    private static let readStateKey = "Pim.readAt"
 +    private var cache: [URL: (Date, PimSession)] = [:]
 +    private var refreshInFlight = false
@@ -86,10 +88,14 @@ index 0000000..1d09dcc
 +        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
 +            Task { @MainActor [weak self] in self?.refresh() }
 +        }
++        statusTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
++            Task { @MainActor [weak self] in self?.refreshStatus() }
++        }
 +    }
 +
 +    deinit {
 +        timer?.invalidate()
++        statusTimer?.invalidate()
 +    }
 +
 +    func isUnread(_ session: PimSession) -> Bool {
@@ -113,15 +119,23 @@ index 0000000..1d09dcc
 +        let oldCache = cache
 +        DispatchQueue.global(qos: .utility).async { [weak self] in
 +            let (sessions, cache) = Self.loadSessions(cached: oldCache)
-+            let status = Self.loadStatus()
 +            Task { @MainActor [weak self] in
 +                guard let self else { return }
 +                self.cache = cache
 +                if self.sessions != sessions {
 +                    self.sessions = sessions
 +                }
-+                self.applyStatus(status)
 +                self.refreshInFlight = false
++            }
++        }
++    }
++
++    private func refreshStatus() {
++        DispatchQueue.global(qos: .utility).async { [weak self] in
++            let status = Self.loadStatus()
++            Task { @MainActor [weak self] in
++                guard let self else { return }
++                self.applyStatus(status)
 +            }
 +        }
 +    }
@@ -161,6 +175,11 @@ index 0000000..1d09dcc
 +                      let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
 +                      let path = status["session"] as? String,
 +                      let state = status["state"] as? String else { continue }
++                if let pid = (status["pid"] as? NSNumber)?.int32Value,
++                   pid > 0,
++                   kill(pid, 0) != 0 {
++                    continue
++                }
 +                let session = URL(fileURLWithPath: path)
 +                states[session] = state
 +                let role = status["role"] as? String ?? "foreground"
