@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..2ccc6bd
+index 0000000..a4213f1
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,460 @@
+@@ -0,0 +1,467 @@
 +import Foundation
 +import SwiftUI
 +
@@ -327,6 +327,7 @@ index 0000000..2ccc6bd
 +struct PimSidebar: View {
 +    @ObservedObject var store: PimSessionStore
 +    @State private var selection: PimSession.ID?
++    @State private var programmaticSelection: PimSession.ID?
 +    let onOpen: (PimSession) -> Void
 +    let onNew: () -> Void
 +    let onToggleActive: (PimSession) -> Void
@@ -420,10 +421,16 @@ index 0000000..2ccc6bd
 +            .onChange(of: store.activeSession) { activeSession in
 +                guard let activeSession else { return }
 +                DispatchQueue.main.async {
-+                    if selection != activeSession { selection = activeSession }
++                    guard selection != activeSession else { return }
++                    programmaticSelection = activeSession
++                    selection = activeSession
 +                }
 +            }
 +            .onChange(of: selection) { selection in
++                if programmaticSelection == selection {
++                    programmaticSelection = nil
++                    return
++                }
 +                scheduleOpen(selection)
 +            }
 +            .onSubmit {
@@ -465,7 +472,7 @@ index 0000000..2ccc6bd
 +    }
 +}
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..0055d1e 100644
+index 340a0b4..f406e4a 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -58,6 +58,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
@@ -507,7 +514,7 @@ index 340a0b4..0055d1e 100644
  
          // Setup our notifications for behaviors
          let center = NotificationCenter.default
-@@ -1051,6 +1063,98 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1063,87 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
  
@@ -518,17 +525,6 @@ index 340a0b4..0055d1e 100644
 +        retainCurrentPimSurfaceIfNeeded()
 +        if let cached = pimSurfaces[session.id], !cached.processExited {
 +            showPimSurface(cached, for: session)
-+            return
-+        }
-+
-+        if let currentSession,
-+           !pimSessionStore.isKeptActivePath(currentSession),
-+           let surface = focusedSurface?.surfaceModel,
-+           let focusedSurface,
-+           !focusedSurface.processExited {
-+            let encoded = Data(session.id.path.utf8).base64EncodedString()
-+            surface.sendPimResume("/pim-resume \(encoded)")
-+            currentPimSession = session.id
 +            return
 +        }
 +
@@ -606,7 +602,7 @@ index 340a0b4..0055d1e 100644
      // MARK: - NSWindowController
  
      override func windowWillLoad() {
-@@ -1085,7 +1189,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1085,7 +1178,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
  
          // Initialize our content view to the SwiftUI root
          let container = TerminalViewContainer {
@@ -625,7 +621,7 @@ index 340a0b4..0055d1e 100644
          }
  
          // Set the initial content size on the container so that
-@@ -1095,6 +1209,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,6 +1198,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
  
          window.contentView = container
@@ -705,24 +701,6 @@ index bfe42b1..1c8aca7 100644
              let defaultValue = MacOSTitlebarStyle.transparent
              guard let config = self.config else { return defaultValue }
              var v: UnsafePointer<Int8>?
-diff --git a/macos/Sources/Ghostty/Ghostty.Surface.swift b/macos/Sources/Ghostty/Ghostty.Surface.swift
-index a076063..ac0d123 100644
---- a/macos/Sources/Ghostty/Ghostty.Surface.swift
-+++ b/macos/Sources/Ghostty/Ghostty.Surface.swift
-@@ -44,6 +44,13 @@ extension Ghostty {
-             }
-         }
- 
-+        /// Submit a Pim session switch through the normal Ghostty input path.
-+        @MainActor
-+        func sendPimResume(_ text: String) {
-+            sendText(text)
-+            sendKeyEvent(.init(key: .enter))
-+        }
-+
-         /// Send text to the terminal as if it was typed. This doesn't send the key events so keyboard
-         /// shortcuts and other encodings do not take effect.
-         @MainActor
 diff --git a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift b/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
 index 0dbdeef..1de0596 100644
 --- a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift	
