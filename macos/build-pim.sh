@@ -49,5 +49,10 @@ rm -rf "$ICONSET" "$ROOT/build/Pim.icns"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.emanuelstadler.pim' "$ROOT/build/Pim.app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIconFile Pim' "$ROOT/build/Pim.app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIconName Pim' "$ROOT/build/Pim.app/Contents/Info.plist"
+# Pim does not use Ghostty's DockTilePlugin: it restores the shared Ghostty
+# icon at launch and overrides the bundle icon in the Dock. Finder already
+# reads Pim.icns directly, so let the Dock use the bundle icon as well.
+rm -rf "$ROOT/build/Pim.app/Contents/PlugIns/DockTilePlugin.plugin"
+/usr/libexec/PlistBuddy -c 'Delete :NSDockTilePlugIn' "$ROOT/build/Pim.app/Contents/Info.plist"
 codesign --force --deep --sign - "$ROOT/build/Pim.app" >/dev/null
 printf '%s\n' "$ROOT/build/Pim.app"
