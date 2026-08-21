@@ -162,6 +162,7 @@ def draw(
     current_cwd: str,
 ) -> None:
     stdscr.erase()
+    stdscr.touchwin()
     height, width = stdscr.getmaxyx()
     rows = flatten(items, current_cwd)
     selected = max(0, min(selected, max(0, len(items) - 1)))
