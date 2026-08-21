@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..4b994b5
+index 0000000..771d93f
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,743 @@
+@@ -0,0 +1,742 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -662,6 +662,10 @@ index 0000000..4b994b5
 +                    .font(.system(size: 11))
 +                    .foregroundStyle(.secondary)
 +                if let state = store.activeStates[session.id] {
++                    Circle()
++                        .fill(Color.green)
++                        .frame(width: 6, height: 6)
++                        .accessibilityLabel("Warm")
 +                    if state == "working" {
 +                        ProgressView()
 +                            .progressViewStyle(.circular)
@@ -669,11 +673,6 @@ index 0000000..4b994b5
 +                            .tint(.orange)
 +                            .frame(width: 8, height: 8)
 +                            .accessibilityLabel("Working")
-+                    } else {
-+                        Circle()
-+                            .fill(Color.green)
-+                            .frame(width: 6, height: 6)
-+                            .accessibilityLabel("Warm and idle")
 +                    }
 +                } else {
 +                    Circle()
