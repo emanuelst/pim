@@ -268,6 +268,11 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
     def loop(stdscr: curses.window) -> None:
         nonlocal active, selected, status
         try:
+            curses.start_color()
+            curses.use_default_colors()
+        except curses.error:
+            pass
+        try:
             curses.curs_set(0)
         except curses.error:
             pass
