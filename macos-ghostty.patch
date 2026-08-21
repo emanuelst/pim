@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..2f6e129
+index 0000000..d95b5cc
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1291 @@
+@@ -0,0 +1,1295 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -857,6 +857,8 @@ index 0000000..2f6e129
 +}
 +
 +struct PimEmptyState: View {
++    @ObservedObject var appearance: PimTerminalAppearance
++
 +    var body: some View {
 +        VStack(spacing: 10) {
 +            Image(systemName: "bubble.left.and.bubble.right")
@@ -869,7 +871,9 @@ index 0000000..2f6e129
 +                .foregroundStyle(.secondary)
 +        }
 +        .frame(maxWidth: .infinity, maxHeight: .infinity)
-+        .background(.clear)
++        // Fully cover the inert bootstrap terminal. Its login banner must
++        // never leak through the choose-a-chat state.
++        .background(appearance.backgroundColor)
 +        .contentShape(Rectangle())
 +    }
 +}
@@ -1086,7 +1090,7 @@ index 0000000..2f6e129
 +                    ZStack {
 +                        TerminalView(ghostty: ghostty, viewModel: viewModel, delegate: delegate)
 +                        if store.activeSession == nil && store.switchingTo == nil {
-+                            PimEmptyState()
++                            PimEmptyState(appearance: appearance)
 +                        }
 +                        PimLoadingOverlay(store: store)
 +                    }
