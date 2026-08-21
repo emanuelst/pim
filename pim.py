@@ -137,20 +137,24 @@ def ask(stdscr: curses.window, prompt: str) -> str:
         curses.noecho()
 
 
-def flatten(items: list[Session], current_cwd: str) -> list[tuple[str, str | Session]]:
+def flatten(items: list[Session], current_cwd: str) -> tuple[list[tuple[str, str | Session]], list[int]]:
     groups: dict[str, list[Session]] = {}
     for item in items:
         groups.setdefault(item.cwd, []).append(item)
 
     rows: list[tuple[str, str | Session]] = []
+    order: list[int] = []
+    index_by_file = {item.file: index for index, item in enumerate(items)}
     groups = dict(sorted(
         groups.items(),
         key=lambda pair: (pair[0] != current_cwd, -max(s.updated for s in pair[1])),
     ))
     for cwd, group in groups.items():
         rows.append(("heading", cwd))
-        rows.extend(("session", item) for item in group)
-    return rows
+        for item in group:
+            rows.append(("session", item))
+            order.append(index_by_file[item.file])
+    return rows, order
 
 
 def draw(
@@ -164,7 +168,7 @@ def draw(
     stdscr.erase()
     stdscr.touchwin()
     height, width = stdscr.getmaxyx()
-    rows = flatten(items, current_cwd)
+    rows, _ = flatten(items, current_cwd)
     selected = max(0, min(selected, max(0, len(items) - 1)))
 
     try:
@@ -267,6 +271,13 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
             curses.curs_set(0)
         except curses.error:
             pass
+        def move_selection(items: list[Session], selected: int, delta: int) -> int:
+            _, order = flatten(items, start_cwd)
+            if not order:
+                return 0
+            position = order.index(selected) if selected in order else 0
+            return order[(position + delta) % len(order)]
+
         def refresh_items(items: list[Session], selected: int) -> tuple[list[Session], int]:
             selected_file = items[selected].file if items and selected < len(items) else None
             fresh = load()
@@ -295,9 +306,9 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
                 tmux(socket, "kill-session", "-t", session_name, check=False)
                 return
             if key in (curses.KEY_UP, ord("k")) and items:
-                selected = (selected - 1) % len(items)
+                selected = move_selection(items, selected, -1)
             elif key in (curses.KEY_DOWN, ord("j")) and items:
-                selected = (selected + 1) % len(items)
+                selected = move_selection(items, selected, 1)
             elif key in (10, 13, curses.KEY_ENTER) and items:
                 active, status = switch(items[selected])
                 items, selected = refresh_items(items, selected)
@@ -379,6 +390,11 @@ def self_test() -> None:
         assert item.cwd == "/tmp/project"
         assert item.label == "Widget fix"
         assert item.title == "Fix the widget"
+        rows, order = flatten([
+            Session(Path("/tmp/other.jsonl"), "/tmp/other", None, "other", 2),
+            Session(Path("/tmp/current.jsonl"), "/tmp/current", None, "current", 1),
+        ], "/tmp/current")
+        assert order == [1, 0] and rows[0][0] == "heading"
         append_session_name(path, "Renamed")
         assert read_session(path).name == "Renamed"
     assert "pi" in pi_command("/tmp/project", Path("/tmp/a b.jsonl"))
