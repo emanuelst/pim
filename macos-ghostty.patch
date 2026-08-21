@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..29ee4cd
+index 0000000..51dd0f2
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,422 @@
+@@ -0,0 +1,427 @@
 +import Foundation
 +import SwiftUI
 +
@@ -391,14 +391,10 @@ index 0000000..29ee4cd
 +                if let activeSession { selection = activeSession }
 +            }
 +            .onChange(of: selection) { selection in
-+                guard let selection,
-+                      let session = store.sessions.first(where: { $0.id == selection }) else { return }
-+                onOpen(session)
++                scheduleOpen(selection)
 +            }
 +            .onSubmit {
-+                guard let selection,
-+                      let session = store.sessions.first(where: { $0.id == selection }) else { return }
-+                onOpen(session)
++                scheduleOpen(selection)
 +            }
 +        }
 +        .background {
@@ -415,6 +411,15 @@ index 0000000..29ee4cd
 +#endif
 +        }
 +        .frame(minWidth: 230, idealWidth: 260, maxWidth: 420)
++    }
++
++    private func scheduleOpen(_ id: PimSession.ID?) {
++        guard let id,
++              let session = store.sessions.first(where: { $0.id == id }) else { return }
++        DispatchQueue.main.async {
++            guard selection == id else { return }
++            onOpen(session)
++        }
 +    }
 +
 +    private func ageLabel(_ date: Date) -> String {
