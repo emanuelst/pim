@@ -1,0 +1,260 @@
+diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
+new file mode 100644
+index 0000000..9e12db8
+--- /dev/null
++++ b/macos/Sources/Features/Pim/PimSession.swift
+@@ -0,0 +1,161 @@
++import Foundation
++import SwiftUI
++
++struct PimSession: Identifiable, Hashable {
++    let id: URL
++    let cwd: String
++    let name: String?
++    let title: String?
++    let modified: Date
++
++    var displayName: String {
++        name ?? title ?? "Untitled session"
++    }
++}
++
++@MainActor
++final class PimSessionStore: ObservableObject {
++    @Published private(set) var sessions: [PimSession] = []
++    private var timer: Timer?
++
++    init() {
++        refresh()
++        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
++            Task { @MainActor [weak self] in self?.refresh() }
++        }
++    }
++
++    deinit {
++        timer?.invalidate()
++    }
++
++    func refresh() {
++        sessions = Self.loadSessions()
++    }
++
++    static func loadSessions() -> [PimSession] {
++        let root = FileManager.default.homeDirectoryForCurrentUser
++            .appendingPathComponent(".pi/agent/sessions")
++        guard let enumerator = FileManager.default.enumerator(
++            at: root,
++            includingPropertiesForKeys: [.contentModificationDateKey],
++            options: [.skipsHiddenFiles]
++        ) else { return [] }
++
++        return enumerator.compactMap { item -> PimSession? in
++            guard let url = item as? URL, url.pathExtension == "jsonl" else { return nil }
++            return read(url)
++        }.sorted { $0.modified > $1.modified }
++    }
++
++    static func initialConfiguration() -> Ghostty.SurfaceConfiguration {
++        var config = Ghostty.SurfaceConfiguration()
++        let cwd = FileManager.default.currentDirectoryPath
++        config.workingDirectory = cwd
++        config.command = if let session = loadSessions().first(where: { $0.cwd == cwd }) {
++            launchCommand(for: session)
++        } else {
++            launchCommand()
++        }
++        return config
++    }
++
++    static func launchCommand(for session: PimSession) -> String {
++        "\(quote(piExecutable)) --session \(quote(session.id.path))"
++    }
++
++    static func launchCommand() -> String {
++        quote(piExecutable)
++    }
++
++    private static var piExecutable: String {
++        if let configured = ProcessInfo.processInfo.environment["PIM_PI_PATH"],
++           FileManager.default.isExecutableFile(atPath: configured) {
++            return configured
++        }
++        let home = FileManager.default.homeDirectoryForCurrentUser.path
++        let candidates = [
++            "\(home)/Library/pnpm/bin/pi",
++            "\(home)/.bun/bin/pi",
++            "/opt/homebrew/bin/pi",
++            "/usr/local/bin/pi",
++        ]
++        return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) ?? "pi"
++    }
++
++    private static func read(_ url: URL) -> PimSession? {
++        guard let data = try? Data(contentsOf: url) else { return nil }
++        var cwd: String?
++        var name: String?
++        var title: String?
++
++        for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
++            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
++                  let type = object["type"] as? String else { continue }
++            if type == "session", cwd == nil {
++                cwd = object["cwd"] as? String
++            } else if type == "session_info" {
++                name = object["name"] as? String
++            } else if type == "message", title == nil,
++                      let message = object["message"] as? [String: Any],
++                      message["role"] as? String == "user" {
++                if let text = message["content"] as? String {
++                    title = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
++                }
++            }
++        }
++
++        guard let cwd else { return nil }
++        let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
++            ?? Date.distantPast
++        return PimSession(id: url, cwd: cwd, name: name, title: title, modified: modified)
++    }
++
++    private static func quote(_ value: String) -> String {
++        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
++    }
++}
++
++struct PimSidebar: View {
++    @ObservedObject var store: PimSessionStore
++    @State private var selection: PimSession.ID?
++    let onOpen: (PimSession) -> Void
++    let onNew: () -> Void
++
++    var body: some View {
++        VStack(spacing: 0) {
++            HStack {
++                Text("Chats")
++                    .font(.headline)
++                Spacer()
++                Button(action: onNew) {
++                    Image(systemName: "plus")
++                }
++                .buttonStyle(.borderless)
++                .help("New Chat")
++            }
++            .padding(.horizontal, 12)
++            .padding(.vertical, 10)
++
++            List(store.sessions, selection: $selection) { session in
++                VStack(alignment: .leading, spacing: 3) {
++                    Text(session.displayName)
++                        .lineLimit(1)
++                    Text(session.cwd)
++                        .font(.caption)
++                        .foregroundStyle(.secondary)
++                        .lineLimit(1)
++                }
++                .padding(.vertical, 3)
++                .tag(session.id)
++            }
++            .listStyle(.sidebar)
++            .onSubmit {
++                guard let selection,
++                      let session = store.sessions.first(where: { $0.id == selection }) else { return }
++                onOpen(session)
++            }
++        }
++        .frame(minWidth: 230, idealWidth: 280, maxWidth: 340)
++    }
++}
+diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
+index 340a0b4..1bb8b84 100644
+--- a/macos/Sources/Features/Terminal/TerminalController.swift
++++ b/macos/Sources/Features/Terminal/TerminalController.swift
+@@ -58,6 +58,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+     /// The configuration derived from the Ghostty config so we don't need to rely on references.
+     private(set) var derivedConfig: DerivedConfig
+ 
++    private lazy var pimSessionStore = PimSessionStore()
++
+     /// The notification cancellable for focused surface property changes.
+     private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
+ 
+@@ -66,17 +68,19 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+          withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
+          parent: NSWindow? = nil
+     ) {
++        let pimBase = base ?? PimSessionStore.initialConfiguration()
++
+         // The window we manage is not restorable if we've specified a command
+         // to execute. We do this because the restored window is meaningless at the
+         // time of writing this: it'd just restore to a shell in the same directory
+         // as the script. We may want to revisit this behavior when we have scrollback
+         // restoration.
+-        self.restorable = (base?.command ?? "") == ""
++        self.restorable = (pimBase.command ?? "") == ""
+ 
+         // Setup our initial derived config based on the current app config
+         self.derivedConfig = DerivedConfig(ghostty.config)
+ 
+-        super.init(ghostty, baseConfig: base, surfaceTree: tree)
++        super.init(ghostty, baseConfig: pimBase, surfaceTree: tree)
+ 
+         // Setup our notifications for behaviors
+         let center = NotificationCenter.default
+@@ -1051,6 +1055,41 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+             tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
+     }
+ 
++    private func openPimSession(_ session: PimSession) {
++        guard let ghosttyApp = ghostty.app else { return }
++        var config = Ghostty.SurfaceConfiguration()
++        config.workingDirectory = session.cwd
++        config.command = PimSessionStore.launchCommand(for: session)
++        let view = Ghostty.SurfaceView(ghosttyApp, baseConfig: config)
++        replaceSurfaceTree(
++            .init(view: view),
++            moveFocusTo: view,
++            moveFocusFrom: focusedSurface,
++            undoAction: "Switch Chat")
++    }
++
++    private func newPimChat() {
++        let panel = NSOpenPanel()
++        panel.canChooseFiles = false
++        panel.canChooseDirectories = true
++        panel.allowsMultipleSelection = false
++        panel.prompt = "New Chat"
++        guard let window else { return }
++        panel.beginSheetModal(for: window) { [weak self] response in
++            guard response == .OK, let path = panel.url?.path, let self else { return }
++            guard let ghosttyApp = self.ghostty.app else { return }
++            var config = Ghostty.SurfaceConfiguration()
++            config.workingDirectory = path
++            config.command = PimSessionStore.launchCommand()
++            let view = Ghostty.SurfaceView(ghosttyApp, baseConfig: config)
++            self.replaceSurfaceTree(
++                .init(view: view),
++                moveFocusTo: view,
++                moveFocusFrom: self.focusedSurface,
++                undoAction: "New Chat")
++        }
++    }
++
+     // MARK: - NSWindowController
+ 
+     override func windowWillLoad() {
+@@ -1085,7 +1124,14 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+ 
+         // Initialize our content view to the SwiftUI root
+         let container = TerminalViewContainer {
+-            TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
++            HStack(spacing: 0) {
++                PimSidebar(
++                    store: pimSessionStore,
++                    onOpen: { [weak self] session in self?.openPimSession(session) },
++                    onNew: { [weak self] in self?.newPimChat() })
++                Divider()
++                TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
++            }
+         }
+ 
+         // Set the initial content size on the container so that

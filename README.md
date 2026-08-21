@@ -34,3 +34,16 @@ Run the small check with:
 ```sh
 python3 ~/pim/pim.py --self-test
 ```
+
+## Native macOS test app
+
+The native build uses a pinned Ghostty checkout and its macOS terminal view:
+
+```sh
+cd ~/pim
+./macos/build-pim.sh
+./macos/run-pim.sh
+```
+
+The first build requires Xcode, Zig, and the Metal toolchain. The app is an
+unsigned local test build named `build/Pim.app`.
