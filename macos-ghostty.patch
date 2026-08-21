@@ -1,13 +1,33 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..035c1f8
+index 0000000..564bc88
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1345 @@
+@@ -0,0 +1,1365 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
 +import Darwin
++
++enum PimBranding {
++    static func installMenuTitles() {
++        guard Bundle.main.bundleURL.lastPathComponent == "Pim.app" else { return }
++
++        func apply() {
++            guard let applicationMenu = NSApp.mainMenu?.items.first(where: {
++                $0.submenu?.items.contains(where: { item in
++                    item.title.localizedCaseInsensitiveContains("about ")
++                }) == true
++            }), let aboutItem = applicationMenu.submenu?.items.first(where: {
++                $0.title.localizedCaseInsensitiveContains("about ")
++            }) else { return }
++            aboutItem.title = "About Pim"
++        }
++
++        apply()
++        DispatchQueue.main.async { apply() }
++    }
++}
 +
 +final class PimWindowDragView: NSView {
 +    override func mouseDown(with event: NSEvent) {
@@ -1373,7 +1393,7 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..ff4e2ea 100644
+index 340a0b4..aba8983 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -6,6 +6,10 @@ import GhosttyKit
@@ -1643,7 +1663,15 @@ index 340a0b4..ff4e2ea 100644
      // MARK: - NSWindowController
 
      override func windowWillLoad() {
-@@ -1068,6 +1255,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1061,6 +1248,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+     override func windowDidLoad() {
+         super.windowDidLoad()
+         guard let window else { return }
++        PimBranding.installMenuTitles()
+
+         // I copy this because we may change the source in the future but also because
+         // I regularly audit our codebase for "ghostty.config" access because generally
+@@ -1068,6 +1256,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          // use whatever the latest app-level config is.
          let config = ghostty.config
 
@@ -1656,7 +1684,7 @@ index 340a0b4..ff4e2ea 100644
          // Setting all three of these is required for restoration to work.
          window.isRestorable = restorable
          if restorable {
-@@ -1083,9 +1276,33 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1083,9 +1277,33 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              focusedSurface = view
          }
 
@@ -1691,7 +1719,7 @@ index 340a0b4..ff4e2ea 100644
          }
 
          // Set the initial content size on the container so that
-@@ -1095,7 +1312,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1313,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
 
          window.contentView = container
