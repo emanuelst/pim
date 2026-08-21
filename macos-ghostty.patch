@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..ce54c33
+index 0000000..c2c56b8
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1302 @@
+@@ -0,0 +1,1338 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -1067,6 +1067,29 @@ index 0000000..ce54c33
 +    }
 +}
 +
++private final class PimEffectiveAppearanceObserverView: NSView {
++    var onChange: (() -> Void)?
++
++    override func viewDidChangeEffectiveAppearance() {
++        super.viewDidChangeEffectiveAppearance()
++        onChange?()
++    }
++}
++
++private struct PimEffectiveAppearanceObserver: NSViewRepresentable {
++    let onChange: () -> Void
++
++    func makeNSView(context: Context) -> PimEffectiveAppearanceObserverView {
++        let view = PimEffectiveAppearanceObserverView()
++        view.onChange = onChange
++        return view
++    }
++
++    func updateNSView(_ view: PimEffectiveAppearanceObserverView, context: Context) {
++        view.onChange = onChange
++    }
++}
++
 +struct PimWorkspace<ViewModel: TerminalViewModel>: View {
 +    @ObservedObject var store: PimSessionStore
 +    @ObservedObject var ghostty: Ghostty.App
@@ -1075,6 +1098,7 @@ index 0000000..ce54c33
 +    @ObservedObject var appearance: PimTerminalAppearance
 +    @ObservedObject var sidebarVisibility: PimSidebarVisibility
 +    @ObservedObject var searchState: PimSearchState
++    let onAppearanceChange: () -> Void
 +    @AppStorage("Pim.superGlass") private var superGlass = false
 +    let onOpen: (PimSession) -> Void
 +    let onNew: () -> Void
@@ -1085,6 +1109,7 @@ index 0000000..ce54c33
 +                if sidebarVisibility.isVisible {
 +                    PimSidebar(
 +                        store: store,
++                        searchState: searchState,
 +                        onOpen: onOpen,
 +                        onNew: onNew)
 +                }
@@ -1104,6 +1129,8 @@ index 0000000..ce54c33
 +                    .padding(.top, 8)
 +                    .zIndex(1)
 +            }
++            PimEffectiveAppearanceObserver(onChange: onAppearanceChange)
++                .frame(width: 0, height: 0)
 +        }
 +        .ignoresSafeArea(.container, edges: .top)
 +        .background {
@@ -1121,6 +1148,7 @@ index 0000000..ce54c33
 +
 +struct PimSidebar: View {
 +    @ObservedObject var store: PimSessionStore
++    @ObservedObject var searchState: PimSearchState
 +    @State private var selection: PimSession.ID?
 +    @State private var programmaticSelection: PimSession.ID?
 +    @State private var renamingSession: PimSession.ID?
@@ -1135,6 +1163,14 @@ index 0000000..ce54c33
 +                Text("Chats")
 +                    .font(.headline)
 +                Spacer()
++                Button {
++                    searchState.isPresented = true
++                } label: {
++                    Image(systemName: "magnifyingglass")
++                }
++                .buttonStyle(.borderless)
++                .help("Search Chats and Transcripts")
++                .keyboardShortcut("f", modifiers: [.command])
 +                Button {
 +                    superGlass.toggle()
 +                } label: {
@@ -1330,7 +1366,7 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..cd430ef 100644
+index 340a0b4..d3a5a1f 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -6,6 +6,10 @@ import GhosttyKit
@@ -1352,7 +1388,7 @@ index 340a0b4..cd430ef 100644
 +    private let pimSidebarVisibility = PimSidebarVisibility()
 +    private let pimSearchState = PimSearchState()
 +    private var pimSidebarAccessory: PimSidebarAccessoryViewController?
-+    private var pimSearchAccessory: PimSearchAccessoryViewController?
++    private var pimAppearanceObserver: NSObjectProtocol?
 +
 +    private lazy var pimSessionStore = PimSessionStore()
 +    private var pimSurfaces: [URL: Ghostty.SurfaceView] = [:]
@@ -1391,15 +1427,18 @@ index 340a0b4..cd430ef 100644
 
          // Setup our notifications for behaviors
          let center = NotificationCenter.default
-@@ -140,6 +164,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -140,6 +164,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      }
 
      deinit {
 +        pimProcessMonitor?.invalidate()
++        if let pimAppearanceObserver {
++            NotificationCenter.default.removeObserver(pimAppearanceObserver)
++        }
          // Remove all of our notificationcenter subscriptions
          let center = NotificationCenter.default
          center.removeObserver(self)
-@@ -190,7 +215,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -190,7 +218,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          _ newTree: SplitTree<Ghostty.SurfaceView>,
          moveFocusTo newView: Ghostty.SurfaceView? = nil,
          moveFocusFrom oldView: Ghostty.SurfaceView? = nil,
@@ -1409,7 +1448,7 @@ index 340a0b4..cd430ef 100644
      ) {
          // We have a special case if our tree is empty to close our tab immediately.
          // This makes it so that undo is handled properly.
-@@ -203,7 +229,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -203,7 +232,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              newTree,
              moveFocusTo: newView,
              moveFocusFrom: oldView,
@@ -1419,7 +1458,7 @@ index 340a0b4..cd430ef 100644
      }
 
      // MARK: Terminal Creation
-@@ -621,6 +648,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -621,6 +651,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
          // Sync our zoom state for splits
          window.surfaceIsZoomed = surfaceTree.zoomed != nil
@@ -1430,11 +1469,15 @@ index 340a0b4..cd430ef 100644
 
          // Set the font for the window and tab titles.
          if let titleFontName = surfaceConfig.windowTitleFontFamily {
-@@ -631,6 +662,14 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -631,6 +665,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
          // Call this last in case it uses any of the properties above.
          window.syncAppearance(surfaceConfig)
 +        if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
++            // Pim follows the system appearance. Ghostty's configured window
++            // theme must not pin the window to dark or light mode.
++            NSApplication.shared.appearance = nil
++            window.appearance = nil
 +            // Pim owns the glass composition. Ghostty's normal appearance
 +            // sync can otherwise restore an opaque window during launch,
 +            // leaving the initial sidebar different from the toggled state.
@@ -1445,7 +1488,7 @@ index 340a0b4..cd430ef 100644
          terminalViewContainer?.ghosttyConfigDidChange(ghostty.config, preferredBackgroundColor: window.preferredBackgroundColor)
      }
 
-@@ -1051,6 +1090,151 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1097,151 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
 
@@ -1597,7 +1640,29 @@ index 340a0b4..cd430ef 100644
      // MARK: - NSWindowController
 
      override func windowWillLoad() {
-@@ -1083,9 +1267,29 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1068,6 +1259,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+         // use whatever the latest app-level config is.
+         let config = ghostty.config
+
++        if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
++            // Pim follows the user's macOS appearance instead of locking the
++            // application to the terminal's configured window theme.
++            NSApplication.shared.appearance = nil
++            pimAppearanceObserver = NotificationCenter.default.addObserver(
++                forName: Notification.Name("NSApplicationDidChangeEffectiveAppearanceNotification"),
++                object: nil,
++                queue: .main
++            ) { [weak self] _ in
++                guard let self else { return }
++                self.updateColorSchemeForSurfaceTree()
++                self.syncAppearance()
++            }
++        }
++
+         // Setting all three of these is required for restoration to work.
+         window.isRestorable = restorable
+         if restorable {
+@@ -1083,9 +1289,33 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              focusedSurface = view
          }
 
@@ -1620,6 +1685,10 @@ index 340a0b4..cd430ef 100644
 +                appearance: pimTerminalAppearance,
 +                sidebarVisibility: pimSidebarVisibility,
 +                searchState: pimSearchState,
++                onAppearanceChange: { [weak self] in
++                    self?.updateColorSchemeForSurfaceTree()
++                    self?.syncAppearance()
++                },
 +                onOpen: { [weak self] session in
 +                    self?.pimSessionStore.markRead(session)
 +                    self?.openPimSession(session)
@@ -1628,7 +1697,7 @@ index 340a0b4..cd430ef 100644
          }
 
          // Set the initial content size on the container so that
-@@ -1095,7 +1299,23 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1325,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
 
          window.contentView = container
@@ -1637,11 +1706,6 @@ index 340a0b4..cd430ef 100644
 +            let accessory = PimSidebarAccessoryViewController(visibility: pimSidebarVisibility)
 +            window.addTitlebarAccessoryViewController(accessory)
 +            pimSidebarAccessory = accessory
-+        }
-+        if pimSearchAccessory == nil {
-+            let accessory = PimSearchAccessoryViewController(state: pimSearchState)
-+            window.addTitlebarAccessoryViewController(accessory)
-+            pimSearchAccessory = accessory
 +        }
 +        DispatchQueue.main.async { [weak self] in
 +            guard let self, self.pimForegroundSurface == nil,
@@ -1764,10 +1828,10 @@ index bfe42b1..1c8aca7 100644
              guard let config = self.config else { return defaultValue }
              var v: UnsafePointer<Int8>?
 diff --git a/macos/Sources/Ghostty/Ghostty.Surface.swift b/macos/Sources/Ghostty/Ghostty.Surface.swift
-index a076063..dc453d9 100644
+index a076063..a182fe5 100644
 --- a/macos/Sources/Ghostty/Ghostty.Surface.swift
 +++ b/macos/Sources/Ghostty/Ghostty.Surface.swift
-@@ -1,5 +1,55 @@
+@@ -1,5 +1,65 @@
 +import Foundation
  import GhosttyKit
 
@@ -1796,7 +1860,10 @@ index a076063..dc453d9 100644
 +        draining = true
 +        lock.unlock()
 +        if shouldStart {
-+            queue.async { [self] in drain() }
++            // During a live resize AppKit can produce a long stream of
++            // intermediate sizes. Let that burst settle before touching
++            // libghostty so its IO mailbox receives one useful resize.
++            queue.asyncAfter(deadline: .now() + .milliseconds(50)) { [self] in drain() }
 +        }
 +    }
 +
@@ -1816,6 +1883,13 @@ index a076063..dc453d9 100644
 +            DispatchQueue.main.async {
 +                request.completion(size)
 +            }
++
++            lock.lock()
++            let morePending = pending != nil
++            if !morePending { draining = false }
++            lock.unlock()
++            if !morePending { return }
++            Thread.sleep(forTimeInterval: 0.05)
 +        }
 +    }
 +}
@@ -1823,7 +1897,7 @@ index a076063..dc453d9 100644
  extension Ghostty {
      /// Represents a single surface within Ghostty.
      ///
-@@ -13,6 +63,7 @@ extension Ghostty {
+@@ -13,6 +73,7 @@ extension Ghostty {
          /// A surface is sendable because it is just a reference type. Using the surface in parameters
          /// may be unsafe but the value itself is safe to send across threads.
          nonisolated(unsafe) private let surface: ghostty_surface_t
@@ -1831,7 +1905,7 @@ index a076063..dc453d9 100644
 
          /// Read the underlying C value for this surface. This is unsafe because the value will be
          /// freed when the Surface class is deinitialized.
-@@ -44,6 +95,56 @@ extension Ghostty {
+@@ -44,6 +105,56 @@ extension Ghostty {
              }
          }
 
@@ -1888,7 +1962,7 @@ index a076063..dc453d9 100644
          /// Send text to the terminal as if it was typed. This doesn't send the key events so keyboard
          /// shortcuts and other encodings do not take effect.
          @MainActor
-@@ -141,6 +242,16 @@ extension Ghostty {
+@@ -141,6 +252,16 @@ extension Ghostty {
          /// - Parameter event: The mouse position event to send to the terminal
          @MainActor
          func sendMousePos(_ event: Input.MousePosEvent) {
@@ -1905,7 +1979,7 @@ index a076063..dc453d9 100644
              ghostty_surface_mouse_pos(
                  surface,
                  event.x,
-@@ -157,6 +268,16 @@ extension Ghostty {
+@@ -157,6 +278,16 @@ extension Ghostty {
          /// - Parameter event: The mouse scroll event to send to the terminal
          @MainActor
          func sendMouseScroll(_ event: Input.MouseScrollEvent) {
@@ -1922,7 +1996,7 @@ index a076063..dc453d9 100644
              ghostty_surface_mouse_scroll(
                  surface,
                  event.x,
-@@ -164,6 +285,8 @@ extension Ghostty {
+@@ -164,6 +295,8 @@ extension Ghostty {
                  event.mods.cScrollMods)
          }
 
