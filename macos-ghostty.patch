@@ -427,7 +427,7 @@ index 0000000..29ee4cd
 +    }
 +}
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..4f09d45 100644
+index 340a0b4..0665745 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -58,6 +58,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
@@ -467,7 +467,7 @@ index 340a0b4..4f09d45 100644
  
          // Setup our notifications for behaviors
          let center = NotificationCenter.default
-@@ -1051,6 +1061,98 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1061,99 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
  
@@ -487,7 +487,8 @@ index 340a0b4..4f09d45 100644
 +           let focusedSurface,
 +           !focusedSurface.processExited {
 +            let encoded = Data(session.id.path.utf8).base64EncodedString()
-+            surface.sendText("/pim-resume \(encoded)\n")
++            surface.sendText("/pim-resume \(encoded)")
++            surface.sendKeyEvent(.init(key: .enter))
 +            currentPimSession = session.id
 +            return
 +        }
@@ -566,7 +567,7 @@ index 340a0b4..4f09d45 100644
      // MARK: - NSWindowController
  
      override func windowWillLoad() {
-@@ -1085,7 +1187,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1085,7 +1188,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
  
          // Initialize our content view to the SwiftUI root
          let container = TerminalViewContainer {
@@ -585,7 +586,7 @@ index 340a0b4..4f09d45 100644
          }
  
          // Set the initial content size on the container so that
-@@ -1095,6 +1207,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,6 +1208,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
  
          window.contentView = container
