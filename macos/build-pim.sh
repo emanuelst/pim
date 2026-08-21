@@ -26,6 +26,7 @@ xcodebuild -project Ghostty.xcodeproj -scheme Ghostty -configuration Debug SYMRO
 
 rm -rf "$ROOT/build"
 ditto "$PWD/build/Debug/Ghostty.app" "$ROOT/build/Pim.app"
+cp "$ROOT/macos/pim-bridge.ts" "$ROOT/build/Pim.app/Contents/Resources/pim-bridge.ts"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Pim' "$ROOT/build/Pim.app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleName Pim' "$ROOT/build/Pim.app/Contents/Info.plist"
 codesign --force --deep --sign - "$ROOT/build/Pim.app" >/dev/null
