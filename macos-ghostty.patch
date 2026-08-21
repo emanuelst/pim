@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..6fdc39f
+index 0000000..2adb812
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,421 @@
+@@ -0,0 +1,428 @@
 +import Foundation
 +import SwiftUI
 +
@@ -315,6 +315,26 @@ index 0000000..6fdc39f
 +                Text("Chats")
 +                    .font(.headline)
 +                Spacer()
++                if let selection,
++                   let session = store.sessions.first(where: { $0.id == selection }) {
++                    Menu {
++                        Button(store.isKeptActive(session) ? "Stop in Background" : "Keep Active") {
++                            store.toggleKeptActive(session)
++                            onToggleActive(session)
++                        }
++                        Button(store.isUnread(session) ? "Mark as Read" : "Mark as Unread") {
++                            if store.isUnread(session) {
++                                store.markRead(session)
++                            } else {
++                                store.markUnread(session)
++                            }
++                        }
++                    } label: {
++                        Image(systemName: "ellipsis.circle")
++                    }
++                    .menuStyle(.borderlessButton)
++                    .help("Chat options")
++                }
 +                Button(action: onNew) {
 +                    Image(systemName: "plus")
 +                }
@@ -364,19 +384,6 @@ index 0000000..6fdc39f
 +                .padding(.vertical, 1)
 +                .tag(session.id)
 +                    .listRowBackground(Color.clear)
-+                    .contextMenu {
-+                        Button(store.isKeptActive(session) ? "Stop in Background" : "Keep Active") {
-+                            store.toggleKeptActive(session)
-+                            onToggleActive(session)
-+                        }
-+                        Button(store.isUnread(session) ? "Mark as Read" : "Mark as Unread") {
-+                            if store.isUnread(session) {
-+                                store.markRead(session)
-+                            } else {
-+                                store.markUnread(session)
-+                            }
-+                        }
-+                    }
 +                }
 +            }
 +            .listStyle(.sidebar)
