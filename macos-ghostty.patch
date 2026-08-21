@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..10a91e2
+index 0000000..1d09dcc
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,512 @@
+@@ -0,0 +1,517 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -350,15 +350,20 @@ index 0000000..10a91e2
 +private struct PimSuperGlassBackground: NSViewRepresentable {
 +    func makeNSView(context: Context) -> NSVisualEffectView {
 +        let view = NSVisualEffectView()
-+        // HUD material is intentionally more transparent than the normal
-+        // sidebar material, while retaining the frosted/vibrant look.
-+        view.material = .hudWindow
-+        view.blendingMode = .withinWindow
++        // Use the window-behind material so the effect can actually reveal
++        // the desktop/window behind Pim instead of only tinting the sidebar.
++        view.material = .underWindowBackground
++        view.blendingMode = .behindWindow
 +        view.state = .active
 +        return view
 +    }
 +
-+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
++    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
++        guard let window = nsView.window else { return }
++        window.isOpaque = false
++        window.backgroundColor = .clear
++        window.hasShadow = true
++    }
 +}
 +
 +struct PimSidebar: View {
@@ -478,7 +483,7 @@ index 0000000..10a91e2
 +        .background {
 +            if superGlass {
 +                PimSuperGlassBackground()
-+                    .opacity(0.38)
++                    .opacity(0.24)
 +                    .ignoresSafeArea(.container, edges: .top)
 +                    .allowsHitTesting(false)
 +            } else {
