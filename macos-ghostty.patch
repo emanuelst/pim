@@ -526,10 +526,10 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..20342f4 100644
+index 340a0b4..4713d80 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
-@@ -58,6 +58,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -58,6 +58,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      /// The configuration derived from the Ghostty config so we don't need to rely on references.
      private(set) var derivedConfig: DerivedConfig
 
@@ -539,7 +539,6 @@ index 340a0b4..20342f4 100644
 +    private var pimForegroundSurface: Ghostty.SurfaceView?
 +    private var pimForegroundSession: URL?
 +    private var pimPendingSession: PimSession?
-+    private var pimSwitchWorkItem: DispatchWorkItem?
 +    private var pimBackgroundStartInFlight = false
 +    private var currentPimSession: URL?
 +    private var pimSessionUpdates: AnyCancellable?
@@ -547,7 +546,7 @@ index 340a0b4..20342f4 100644
      /// The notification cancellable for focused surface property changes.
      private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
 
-@@ -66,17 +77,27 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -66,17 +76,26 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
           withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
           parent: NSWindow? = nil
      ) {
@@ -570,14 +569,13 @@ index 340a0b4..20342f4 100644
 +        super.init(ghostty, baseConfig: pimBase, surfaceTree: tree)
 +        pimSessionUpdates = pimSessionStore.$sessions.dropFirst().sink { [weak self] _ in
 +            DispatchQueue.main.async {
-+                self?.scheduleInitialPimResume()
 +                self?.startKeptPimSessions()
 +            }
 +        }
 
          // Setup our notifications for behaviors
          let center = NotificationCenter.default
-@@ -190,7 +211,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -190,7 +209,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          _ newTree: SplitTree<Ghostty.SurfaceView>,
          moveFocusTo newView: Ghostty.SurfaceView? = nil,
          moveFocusFrom oldView: Ghostty.SurfaceView? = nil,
@@ -587,7 +585,7 @@ index 340a0b4..20342f4 100644
      ) {
          // We have a special case if our tree is empty to close our tab immediately.
          // This makes it so that undo is handled properly.
-@@ -203,7 +225,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -203,7 +223,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              newTree,
              moveFocusTo: newView,
              moveFocusFrom: oldView,
@@ -597,74 +595,33 @@ index 340a0b4..20342f4 100644
      }
 
      // MARK: Terminal Creation
-@@ -1051,6 +1074,164 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1072,122 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
 
 +    private func openPimSession(_ session: PimSession) {
-+        // Explicitly kept-active sessions have their own process and surface.
-+        // Normal history navigation reuses the one foreground Pi process so a
-+        // click never has to construct a new AppKit/Metal surface.
++        guard currentPimSession != session.id else { return }
++        pimPendingSession = session
++        pimSessionStore.requestActiveSession(session.id)
++        retainCurrentPimSurfaceIfNeeded()
++
 +        if let cached = pimSurfaces[session.id], !cached.processExited {
++            pimPendingSession = nil
 +            showPimSurface(cached, for: session)
 +            return
 +        }
-+        requestPimSession(session)
-+    }
 +
-+    private func capturePimForegroundSurfaceIfNeeded() {
-+        guard pimForegroundSurface == nil,
-+              let surface = focusedSurface,
-+              !surface.processExited else { return }
-+        pimForegroundSurface = surface
-+        pimForegroundSession = currentPimSession
-+    }
-+
-+    private func foregroundPimSurface() -> Ghostty.SurfaceView? {
-+        capturePimForegroundSurfaceIfNeeded()
-+        guard let surface = pimForegroundSurface, !surface.processExited else { return nil }
-+        return surface
-+    }
-+
-+    private func scheduleInitialPimResume() {
-+        let cwd = FileManager.default.currentDirectoryPath
-+        guard currentPimSession == nil,
-+              pimForegroundSession == nil,
-+              let session = pimSessionStore.sessions.first(where: { $0.cwd == cwd }) else { return }
-+        requestPimSession(session)
-+    }
-+
-+    private func requestPimSession(_ session: PimSession) {
-+        pimPendingSession = session
-+        pimSwitchWorkItem?.cancel()
-+        let workItem = DispatchWorkItem { [weak self] in
-+            self?.drainPimSwitch()
++        guard let ghosttyApp = ghostty.app else { return }
++        // Surface creation is deferred so the selection callback can return
++        // before Ghostty starts the new Pi process.
++        DispatchQueue.main.async { [weak self] in
++            guard let self,
++                  self.pimPendingSession?.id == session.id else { return }
++            self.pimPendingSession = nil
++            let view = self.makePimSurface(session, app: ghosttyApp, background: false)
++            self.pimSurfaces[session.id] = view
++            self.showPimSurface(view, for: session)
 +        }
-+        pimSwitchWorkItem = workItem
-+        // Coalesce a burst of clicks before sending anything into the TUI.
-+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: workItem)
-+    }
-+
-+    private func drainPimSwitch() {
-+        guard let session = pimPendingSession,
-+              let surface = foregroundPimSurface() else { return }
-+
-+        // Do not type a slash command into a running Pi turn. Keep the UI
-+        // responsive and retry when the foreground process settles.
-+        if let active = pimSessionStore.activeSession,
-+           pimSessionStore.activeStates[active] == "working" {
-+            let retry = DispatchWorkItem { [weak self] in self?.drainPimSwitch() }
-+            pimSwitchWorkItem = retry
-+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: retry)
-+            return
-+        }
-+
-+        pimPendingSession = nil
-+        pimForegroundSession = session.id
-+        pimSessionStore.requestActiveSession(session.id)
-+        let command = PimSessionStore.resumeCommand(for: session)
-+        surface.surfaceModel?.sendPimResume(command)
-+        showPimSurface(surface, for: session)
 +    }
 +
 +    private func makePimSurface(_ session: PimSession, app: ghostty_app_t, background: Bool) -> Ghostty.SurfaceView {
@@ -750,7 +707,6 @@ index 340a0b4..20342f4 100644
 +        pimForegroundSurface = view
 +        pimForegroundSession = nil
 +        pimPendingSession = nil
-+        pimSwitchWorkItem?.cancel()
 +        currentPimSession = nil
 +        replaceSurfaceTree(
 +            .init(view: view),
@@ -762,7 +718,7 @@ index 340a0b4..20342f4 100644
      // MARK: - NSWindowController
 
      override func windowWillLoad() {
-@@ -1085,7 +1266,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1085,7 +1222,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
          // Initialize our content view to the SwiftUI root
          let container = TerminalViewContainer {
@@ -781,13 +737,16 @@ index 340a0b4..20342f4 100644
          }
 
          // Set the initial content size on the container so that
-@@ -1095,6 +1286,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,6 +1242,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
 
          window.contentView = container
 +        DispatchQueue.main.async { [weak self] in
-+            self?.capturePimForegroundSurfaceIfNeeded()
-+            self?.scheduleInitialPimResume()
++            guard let self, self.pimForegroundSurface == nil,
++                  let surface = self.focusedSurface,
++                  !surface.processExited else { return }
++            self.pimForegroundSurface = surface
++            self.pimForegroundSession = self.currentPimSession
 +        }
 +        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
 +            self?.startKeptPimSessions()
