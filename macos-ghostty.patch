@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..aa078b3
+index 0000000..02acba3
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,408 @@
+@@ -0,0 +1,419 @@
 +import Foundation
 +import SwiftUI
 +
@@ -385,6 +385,7 @@ index 0000000..aa078b3
 +                }
 +            }
 +            .listStyle(.sidebar)
++            .scrollContentBackground(.hidden)
 +            .onChange(of: store.activeSession) { activeSession in
 +                if let activeSession { selection = activeSession }
 +            }
@@ -399,7 +400,17 @@ index 0000000..aa078b3
 +                onOpen(session)
 +            }
 +        }
-+        .background(.regularMaterial)
++        .background {
++#if compiler(>=6.2)
++            if #available(macOS 26.0, *) {
++                Color.clear.glassEffect(.regular, in: Rectangle())
++            } else {
++                Color(nsColor: .windowBackgroundColor)
++            }
++#else
++            Color(nsColor: .windowBackgroundColor)
++#endif
++        }
 +        .frame(minWidth: 230, idealWidth: 260, maxWidth: 420)
 +    }
 +
