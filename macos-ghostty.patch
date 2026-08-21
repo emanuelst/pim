@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..bf4f3c4
+index 0000000..73a38cc
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,587 @@
+@@ -0,0 +1,600 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -467,7 +467,7 @@ index 0000000..bf4f3c4
 +                    superGlass.toggle()
 +                } label: {
 +                    Image(systemName: "wand.and.stars")
-+                        .foregroundStyle(superGlass ? Color.secondary : Color.accentColor)
++                        .foregroundStyle(superGlass ? Color.accentColor : Color.secondary)
 +                }
 +                .buttonStyle(.borderless)
 +                .help(superGlass ? "Turn Off Super Glass" : "Super Glass")
@@ -564,11 +564,24 @@ index 0000000..bf4f3c4
 +            }
 +        }
 +        .background {
-+            PimGlassBackground(superGlass: superGlass)
-+                .id(superGlass)
-+                .opacity(superGlass ? 0.75 : 0.5)
-+                .ignoresSafeArea(.container, edges: .top)
-+                .allowsHitTesting(false)
++            ZStack {
++                PimGlassBackground(superGlass: superGlass)
++                    .id(superGlass)
++                    .opacity(superGlass ? 0.45 : 0.5)
++                    .ignoresSafeArea(.container, edges: .top)
++                    .allowsHitTesting(false)
++                if superGlass {
++#if compiler(>=6.2)
++                    if #available(macOS 26.0, *) {
++                        Color.clear
++                            .glassEffect(.regular, in: Rectangle())
++                            .opacity(0.9)
++                            .ignoresSafeArea(.container, edges: .top)
++                            .allowsHitTesting(false)
++                    }
++#endif
++                }
++            }
 +        }
 +        .frame(minWidth: 230, idealWidth: 260, maxWidth: 420)
 +    }
