@@ -648,3 +648,23 @@ index bfe42b1..1c8aca7 100644
              let defaultValue = MacOSTitlebarStyle.transparent
              guard let config = self.config else { return defaultValue }
              var v: UnsafePointer<Int8>?
+diff --git a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift b/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
+index 0dbdeef..1de0596 100644
+--- a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift	
++++ b/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift	
+@@ -977,6 +977,7 @@ extension Ghostty {
+         }
+ 
+         override func mouseEntered(with event: NSEvent) {
++            guard !mouseOverSurface else { return }
+             mouseOverSurface = true
+             super.mouseEntered(with: event)
+ 
+@@ -998,6 +999,7 @@ extension Ghostty {
+         }
+ 
+         override func mouseExited(with event: NSEvent) {
++            guard mouseOverSurface else { return }
+             mouseOverSurface = false
+             mouseLocationInSurface = nil
+             guard let surfaceModel else { return }
