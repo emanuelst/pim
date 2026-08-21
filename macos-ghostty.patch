@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..bc6bcd6
+index 0000000..7dbefcd
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,351 @@
+@@ -0,0 +1,338 @@
 +import Foundation
 +import SwiftUI
 +
@@ -79,12 +79,6 @@ index 0000000..bc6bcd6
 +
 +    func markUnread(_ session: PimSession) {
 +        readAt.removeValue(forKey: session.id.path)
-+        UserDefaults.standard.set(readAt, forKey: Self.readStateKey)
-+    }
-+
-+    func markAllRead() {
-+        let timestamp = Date().timeIntervalSince1970
-+        for session in sessions { readAt[session.id.path] = timestamp }
 +        UserDefaults.standard.set(readAt, forKey: Self.readStateKey)
 +    }
 +
@@ -272,13 +266,6 @@ index 0000000..bc6bcd6
 +                Text("Chats")
 +                    .font(.headline)
 +                Spacer()
-+                Menu {
-+                    Button("Mark All as Read", action: store.markAllRead)
-+                } label: {
-+                    Image(systemName: "ellipsis.circle")
-+                }
-+                .menuStyle(.borderlessButton)
-+                .help("Chat options")
 +                Button(action: onNew) {
 +                    Image(systemName: "plus")
 +                }
@@ -356,7 +343,7 @@ index 0000000..bc6bcd6
 +    }
 +}
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..74abf78 100644
+index 340a0b4..a5f5a4b 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -58,6 +58,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
@@ -390,7 +377,7 @@ index 340a0b4..74abf78 100644
  
          // Setup our notifications for behaviors
          let center = NotificationCenter.default
-@@ -1051,6 +1055,41 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1055,39 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
  
@@ -403,8 +390,7 @@ index 340a0b4..74abf78 100644
 +        replaceSurfaceTree(
 +            .init(view: view),
 +            moveFocusTo: view,
-+            moveFocusFrom: focusedSurface,
-+            undoAction: "Switch Chat")
++            moveFocusFrom: focusedSurface)
 +    }
 +
 +    private func newPimChat() {
@@ -424,15 +410,14 @@ index 340a0b4..74abf78 100644
 +            self.replaceSurfaceTree(
 +                .init(view: view),
 +                moveFocusTo: view,
-+                moveFocusFrom: self.focusedSurface,
-+                undoAction: "New Chat")
++                moveFocusFrom: self.focusedSurface)
 +        }
 +    }
 +
      // MARK: - NSWindowController
  
      override func windowWillLoad() {
-@@ -1085,7 +1124,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1085,7 +1122,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
  
          // Initialize our content view to the SwiftUI root
          let container = TerminalViewContainer {
