@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..51dd0f2
+index 0000000..6fdc39f
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,427 @@
+@@ -0,0 +1,421 @@
 +import Foundation
 +import SwiftUI
 +
@@ -33,16 +33,7 @@ index 0000000..51dd0f2
 +        guard let model else { return nil }
 +        let provider = provider.map { "(\($0)) " } ?? ""
 +        let level = thinkingLevel == nil || thinkingLevel == "off" ? "thinking off" : thinkingLevel!
-+        let percent = contextWindow == 0 ? "0.0" : String(format: "%.1f", Double(contextTokens) / Double(contextWindow) * 100)
-+        return "$\(String(format: "%.3f", totalCost))\(self.provider == "openai-codex" ? " (sub)" : "") \(percent)%/\(formatTokens(contextWindow)) (auto)    \(provider)\(model) • \(level)"
-+    }
-+
-+    private func formatTokens(_ count: Int) -> String {
-+        if count < 1000 { return "\(count)" }
-+        if count < 10000 { return String(format: "%.1fk", Double(count) / 1000) }
-+        if count < 1_000_000 { return "\(Int(round(Double(count) / 1000)))k" }
-+        if count < 10_000_000 { return String(format: "%.1fM", Double(count) / 1_000_000) }
-+        return "\(Int(round(Double(count) / 1_000_000)))M"
++        return "\(provider)\(model) • \(level)"
 +    }
 +}
 +
@@ -112,7 +103,9 @@ index 0000000..51dd0f2
 +            Task { @MainActor [weak self] in
 +                guard let self else { return }
 +                self.cache = cache
-+                self.sessions = sessions
++                if self.sessions != sessions {
++                    self.sessions = sessions
++                }
 +                self.refreshStatus()
 +                self.refreshInFlight = false
 +            }
@@ -140,9 +133,10 @@ index 0000000..51dd0f2
 +                }
 +            }
 +        }
-+        activeStates = states
-+        activeRoles = roles
-+        activeSession = newestForeground?.0
++        if activeStates != states { activeStates = states }
++        if activeRoles != roles { activeRoles = roles }
++        let nextActiveSession = newestForeground?.0
++        if activeSession != nextActiveSession { activeSession = nextActiveSession }
 +    }
 +
 +    nonisolated static func loadSessions() -> [PimSession] {
