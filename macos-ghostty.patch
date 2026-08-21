@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..aa1269b
+index 0000000..3a9b229
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,367 @@
+@@ -0,0 +1,371 @@
 +import Foundation
 +import SwiftUI
 +
@@ -340,12 +340,16 @@ index 0000000..aa1269b
 +            }
 +        }
 +        .overlay(alignment: .trailing) {
-+            Rectangle()
-+                .fill(Color.clear)
-+                .frame(width: 8)
-+                .contentShape(Rectangle())
-+                .gesture(
-+                    DragGesture()
++            ZStack {
++                Color.black.opacity(0.001)
++                Rectangle()
++                    .fill(Color(nsColor: .separatorColor))
++                    .frame(width: 1)
++            }
++            .frame(width: 12)
++            .contentShape(Rectangle())
++            .highPriorityGesture(
++                DragGesture()
 +                        .onChanged { value in
 +                            if dragStartWidth == nil { dragStartWidth = width }
 +                            width = min(420, max(220, dragStartWidth! + value.translation.width))
