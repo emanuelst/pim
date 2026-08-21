@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..6c5a96f
+index 0000000..52e9e53
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,282 @@
 +import Foundation
 +import SwiftUI
 +
@@ -12,6 +12,9 @@ index 0000000..6c5a96f
 +    let cwd: String
 +    let name: String?
 +    let title: String?
++    let provider: String?
++    let model: String?
++    let thinkingLevel: String?
 +    let modified: Date
 +
 +    var displayName: String {
@@ -21,6 +24,12 @@ index 0000000..6c5a96f
 +    var projectName: String {
 +        let name = URL(fileURLWithPath: cwd).lastPathComponent
 +        return name.isEmpty ? cwd : name
++    }
++
++    var modelLabel: String? {
++        let label = [provider, model].compactMap { $0 }.joined(separator: " / ")
++        guard !label.isEmpty else { return nil }
++        return thinkingLevel == nil || thinkingLevel == "off" ? label : "\(label) · \(thinkingLevel!)"
 +    }
 +}
 +
@@ -144,6 +153,11 @@ index 0000000..6c5a96f
 +        var cwd: String?
 +        var name: String?
 +        var title: String?
++        var provider: String?
++        var model: String?
++        var thinkingLevel: String?
++        var usedProvider: String?
++        var usedModel: String?
 +
 +        for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
 +            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
@@ -152,9 +166,18 @@ index 0000000..6c5a96f
 +                cwd = object["cwd"] as? String
 +            } else if type == "session_info" {
 +                name = object["name"] as? String
-+            } else if type == "message", title == nil,
-+                      let message = object["message"] as? [String: Any],
-+                      message["role"] as? String == "user" {
++            } else if type == "model_change" {
++                provider = object["provider"] as? String
++                model = object["modelId"] as? String
++            } else if type == "thinking_level_change" {
++                thinkingLevel = object["thinkingLevel"] as? String
++            } else if type == "message",
++                      let message = object["message"] as? [String: Any] {
++                if message["role"] as? String == "assistant" {
++                    usedProvider = message["provider"] as? String ?? usedProvider
++                    usedModel = message["model"] as? String ?? usedModel
++                }
++                guard title == nil, message["role"] as? String == "user" else { continue }
 +                let text = if let text = message["content"] as? String {
 +                    text
 +                } else if let content = message["content"] as? [[String: Any]] {
@@ -169,7 +192,15 @@ index 0000000..6c5a96f
 +        }
 +
 +        guard let cwd else { return nil }
-+        return PimSession(id: url, cwd: cwd, name: name, title: title, modified: modified)
++        return PimSession(
++            id: url,
++            cwd: cwd,
++            name: name,
++            title: title,
++            provider: usedProvider ?? provider,
++            model: usedModel ?? model,
++            thinkingLevel: thinkingLevel,
++            modified: modified)
 +    }
 +
 +    private static func quote(_ value: String) -> String {
@@ -209,6 +240,12 @@ index 0000000..6c5a96f
 +                            .font(.system(size: 11))
 +                            .foregroundStyle(.secondary)
 +                            .lineLimit(1)
++                        if let model = session.modelLabel {
++                            Text(model)
++                                .font(.system(size: 10))
++                                .foregroundStyle(.tertiary)
++                                .lineLimit(1)
++                        }
 +                    }
 +                    Spacer(minLength: 0)
 +                    if store.isUnread(session) {
