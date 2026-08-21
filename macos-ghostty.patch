@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..0ec591b
+index 0000000..a54c6e5
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,774 @@
+@@ -0,0 +1,814 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -526,22 +526,31 @@ index 0000000..0ec591b
 +
 +struct PimTitleBar: View {
 +    @ObservedObject var store: PimSessionStore
++    let sidebarVisible: Bool
++    let onToggleSidebar: () -> Void
 +
 +    var body: some View {
 +        ZStack {
 +            PimWindowDragRegion()
-+                .frame(height: 30)
-+            HStack(spacing: 5) {
++                .frame(height: 28)
++            HStack {
++                Button(action: onToggleSidebar) {
++                    Image(systemName: sidebarVisible ? "sidebar.left" : "sidebar.right")
++                }
++                .buttonStyle(.borderless)
++                .help(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
++                .accessibilityLabel(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
 +                Spacer()
++            }
++            HStack(spacing: 5) {
 +                Text(currentSession.map { store.displayName(for: $0) } ?? "Pim")
 +                    .font(.system(size: 13, weight: .semibold))
 +                    .lineLimit(1)
 +                    .truncationMode(.middle)
-+                Spacer()
 +            }
 +            .allowsHitTesting(false)
 +        }
-+        .frame(height: 30)
++        .frame(height: 28)
 +        .background {
 +            // Match the sidebar with a native AppKit material while we tune
 +            // the title-bar geometry. Avoid the opaque white system bar.
@@ -581,6 +590,37 @@ index 0000000..0ec591b
 +            .background(.regularMaterial)
 +            .transition(.opacity)
 +            .animation(.easeOut(duration: 0.15), value: store.switchingTo)
++        }
++    }
++}
++
++struct PimWorkspace<ViewModel: TerminalViewModel>: View {
++    @ObservedObject var store: PimSessionStore
++    @ObservedObject var ghostty: Ghostty.App
++    @ObservedObject var viewModel: ViewModel
++    let delegate: (any TerminalViewDelegate)?
++    let onOpen: (PimSession) -> Void
++    let onNew: () -> Void
++    @State private var sidebarVisible = true
++
++    var body: some View {
++        HSplitView {
++            if sidebarVisible {
++                PimSidebar(
++                    store: store,
++                    onOpen: onOpen,
++                    onNew: onNew)
++            }
++            VStack(spacing: 0) {
++                PimTitleBar(
++                    store: store,
++                    sidebarVisible: sidebarVisible,
++                    onToggleSidebar: { sidebarVisible.toggle() })
++                ZStack {
++                    TerminalView(ghostty: ghostty, viewModel: viewModel, delegate: delegate)
++                    PimLoadingOverlay(store: store)
++                }
++            }
 +        }
 +    }
 +}
@@ -660,7 +700,7 @@ index 0000000..0ec591b
 +                    .allowsHitTesting(false)
 +            }
 +        }
-+        .frame(minWidth: 230, idealWidth: 260, maxWidth: 420)
++        .frame(minWidth: 240, idealWidth: 300, maxWidth: 460)
 +        .alert("Rename Chat", isPresented: Binding(
 +            get: { renamingSession != nil },
 +            set: { if !$0 { renamingSession = nil } }
@@ -802,7 +842,7 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..59cde9e 100644
+index 340a0b4..816e568 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -58,6 +58,14 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
@@ -972,31 +1012,25 @@ index 340a0b4..59cde9e 100644
      // MARK: - NSWindowController
 
      override func windowWillLoad() {
-@@ -1085,7 +1193,22 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1085,7 +1193,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
          // Initialize our content view to the SwiftUI root
          let container = TerminalViewContainer {
 -            TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
-+            HSplitView {
-+                PimSidebar(
-+                    store: pimSessionStore,
-+                    onOpen: { [weak self] session in
-+                        self?.pimSessionStore.markRead(session)
-+                        self?.openPimSession(session)
-+                    },
-+                    onNew: { [weak self] in self?.newPimChat() })
-+                VStack(spacing: 0) {
-+                    PimTitleBar(store: pimSessionStore)
-+                    ZStack {
-+                        TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
-+                        PimLoadingOverlay(store: pimSessionStore)
-+                    }
-+                }
-+            }
++            PimWorkspace(
++                store: pimSessionStore,
++                ghostty: ghostty,
++                viewModel: self,
++                delegate: self,
++                onOpen: { [weak self] session in
++                    self?.pimSessionStore.markRead(session)
++                    self?.openPimSession(session)
++                },
++                onNew: { [weak self] in self?.newPimChat() })
          }
 
          // Set the initial content size on the container so that
-@@ -1095,7 +1218,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1212,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
 
          window.contentView = container
