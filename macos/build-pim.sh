@@ -46,6 +46,7 @@ rm -rf "$ICONSET" "$ROOT/build/Pim.icns"
 
 /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Pim' "$ROOT/build/Pim.app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleName Pim' "$ROOT/build/Pim.app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.emanuelstadler.pim' "$ROOT/build/Pim.app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIconFile Pim' "$ROOT/build/Pim.app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIconName Pim' "$ROOT/build/Pim.app/Contents/Info.plist"
 codesign --force --deep --sign - "$ROOT/build/Pim.app" >/dev/null
