@@ -268,16 +268,17 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
         except curses.error:
             pass
         stdscr.keypad(True)
-        stdscr.timeout(1000)
+        stdscr.timeout(250)
+        items = load()
+        next_refresh = time.monotonic() + 2
         while True:
-            items = load()
-            if items:
-                selected = min(selected, len(items) - 1)
-            else:
-                selected = 0
-            draw(stdscr, items, selected, active, status, start_cwd)
-            key = stdscr.getch()
+            if time.monotonic() >= next_refresh:
+                items = load()
+                selected = min(selected, max(0, len(items) - 1))
+                next_refresh = time.monotonic() + 2
+                draw(stdscr, items, selected, active, status, start_cwd)
 
+            key = stdscr.getch()
             if key == -1:
                 continue
             if key in (ord("q"), 3):
@@ -289,12 +290,21 @@ def manager_loop(socket: str, session_name: str, right_pane: str, start_cwd: str
                 selected = (selected + 1) % len(items)
             elif key in (10, 13, curses.KEY_ENTER) and items:
                 active, status = switch(items[selected])
+                items = load()
+                next_refresh = time.monotonic() + 2
             elif key == ord("n"):
                 active, status = new_session(stdscr)
+                items = load()
+                next_refresh = time.monotonic() + 2
             elif key == ord("r") and items:
                 status = rename_session(stdscr, items[selected])
+                items = load()
+                next_refresh = time.monotonic() + 2
             elif key in (ord("R"), curses.KEY_F5):
+                items = load()
+                next_refresh = time.monotonic() + 2
                 status = "Session list refreshed"
+            draw(stdscr, items, selected, active, status, start_cwd)
 
     curses.wrapper(loop)
 
