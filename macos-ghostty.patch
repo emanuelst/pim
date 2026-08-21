@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..3dc0850
+index 0000000..39a5e92
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,908 @@
+@@ -0,0 +1,909 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -649,10 +649,11 @@ index 0000000..3dc0850
 +            .foregroundStyle(appearance.usesLightForeground ? Color.black : Color.white)
 +            .allowsHitTesting(false)
 +        }
-+        // The window-level Ghostty glass surface supplies the background for
-+        // both the title row and terminal. Keep this row transparent so focus
-+        // changes cannot create a second glass band.
++        // This is a compact content toolbar, not a second glass surface. Match
++        // the terminal tint exactly and let the native window titlebar remain
++        // responsible for the area above it.
 +        .frame(height: 28)
++        .background(appearance.backgroundColor.opacity(appearance.backgroundOpacity))
 +    }
 +
 +    private var currentSession: PimSession? {
