@@ -1,9 +1,9 @@
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..52e9e53
+index 0000000..bb9ea8b
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,282 @@
+@@ -0,0 +1,304 @@
 +import Foundation
 +import SwiftUI
 +
@@ -211,6 +211,8 @@ index 0000000..52e9e53
 +struct PimSidebar: View {
 +    @ObservedObject var store: PimSessionStore
 +    @State private var selection: PimSession.ID?
++    @State private var width: CGFloat = 260
++    @State private var dragStartWidth: CGFloat?
 +    let onOpen: (PimSession) -> Void
 +    let onNew: () -> Void
 +
@@ -274,7 +276,27 @@ index 0000000..52e9e53
 +                onOpen(session)
 +            }
 +        }
-+        .frame(minWidth: 230, idealWidth: 260, maxWidth: 320)
++        .overlay(alignment: .trailing) {
++            Rectangle()
++                .fill(Color.clear)
++                .frame(width: 8)
++                .contentShape(Rectangle())
++                .gesture(
++                    DragGesture()
++                        .onChanged { value in
++                            if dragStartWidth == nil { dragStartWidth = width }
++                            width = min(420, max(220, dragStartWidth! + value.translation.width))
++                        }
++                        .onEnded { _ in
++                            UserDefaults.standard.set(width, forKey: "Pim.sidebarWidth")
++                            dragStartWidth = nil
++                        })
++        }
++        .frame(width: width)
++        .onAppear {
++            let saved = UserDefaults.standard.double(forKey: "Pim.sidebarWidth")
++            if saved > 0 { width = min(420, max(220, saved)) }
++        }
 +    }
 +
 +    private func ageLabel(_ date: Date) -> String {
