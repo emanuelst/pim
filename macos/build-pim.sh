@@ -27,7 +27,26 @@ xcodebuild -project Ghostty.xcodeproj -scheme Ghostty -configuration Debug SYMRO
 rm -rf "$ROOT/build"
 ditto "$PWD/build/Debug/Ghostty.app" "$ROOT/build/Pim.app"
 cp "$ROOT/macos/pim-bridge.ts" "$ROOT/build/Pim.app/Contents/Resources/pim-bridge.ts"
+
+# Replace Ghostty's inherited icon with Pim's native app icon.
+ICONSET="$ROOT/build/Pim.iconset"
+mkdir -p "$ICONSET"
+for spec in \
+  "16 16x16" "32 16x16@2x" "32 32x32" "64 32x32@2x" \
+  "128 128x128" "256 128x128@2x" "256 256x256" "512 256x256@2x" \
+  "512 512x512" "1024 512x512@2x"; do
+  size=${spec%% *}
+  name=${spec#* }
+  sips -z "$size" "$size" "$ROOT/macos/assets/PimIcon.png" \
+    --out "$ICONSET/icon_${name}.png" >/dev/null
+ done
+iconutil -c icns "$ICONSET" -o "$ROOT/build/Pim.icns"
+cp "$ROOT/build/Pim.icns" "$ROOT/build/Pim.app/Contents/Resources/Pim.icns"
+rm -rf "$ICONSET" "$ROOT/build/Pim.icns"
+
 /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Pim' "$ROOT/build/Pim.app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleName Pim' "$ROOT/build/Pim.app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Set :CFBundleIconFile Pim' "$ROOT/build/Pim.app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Set :CFBundleIconName Pim' "$ROOT/build/Pim.app/Contents/Info.plist"
 codesign --force --deep --sign - "$ROOT/build/Pim.app" >/dev/null
 printf '%s\n' "$ROOT/build/Pim.app"
