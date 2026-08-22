@@ -306,6 +306,16 @@ fn drainMailbox(
     // expectation is that all our message handlers will be non-blocking
     // ENOUGH to not mess up throughput on producers.
     var redraw: bool = false;
+
+    // A resize is out-of-band so it cannot sit behind a burst of ordinary
+    // input messages from a busy tool call.
+    if (io.takePendingResize()) |resize| {
+        redraw = true;
+        io.resize(data, resize) catch |err| {
+            log.warn("error during priority resize err={}", .{err});
+        };
+    }
+
     while (mailbox.pop(global.io())) |message| {
         // If we have a message we always redraw
         redraw = true;

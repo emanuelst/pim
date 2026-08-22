@@ -6,6 +6,10 @@ import GhosttyKit
 
 /// A classic, tabbed terminal experience.
 class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Controller {
+    private enum PimSurfaceKind {
+        case pi
+        case shell
+    }
     override var windowNibName: NSNib.Name? {
         let defaultValue = "Terminal"
 
@@ -57,6 +61,25 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     /// The configuration derived from the Ghostty config so we don't need to rely on references.
     private(set) var derivedConfig: DerivedConfig
+    private let pimTerminalAppearance = PimTerminalAppearance()
+    private let pimSidebarVisibility = PimSidebarVisibility()
+    private let pimSearchState = PimSearchState()
+    private var pimSidebarAccessory: PimSidebarAccessoryViewController?
+
+    private lazy var pimSessionStore = PimSessionStore()
+    private var pimSurfaces: [URL: Ghostty.SurfaceView] = [:]
+    private var pimSurfaceKinds: [URL: PimSurfaceKind] = [:]
+    private var pimSurfaceExitCancellables: [URL: AnyCancellable] = [:]
+    private var pimProcessMonitor: Timer?
+    private var untrackedPimSurface: Ghostty.SurfaceView?
+    private var pimForegroundSurface: Ghostty.SurfaceView?
+    private var pimForegroundSession: URL?
+    private var pimPendingSession: PimSession?
+    private var pimPendingSurface: Ghostty.SurfaceView?
+    private var pimPendingStartedAt: Date?
+    private var pimLaunchGeneration = 0
+    private var pimReadySessions: Set<URL> = []
+    private var currentPimSession: URL?
 
     /// The notification cancellable for focused surface property changes.
     private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
@@ -66,17 +89,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
          parent: NSWindow? = nil
     ) {
+        let pimBase = base ?? PimSessionStore.initialConfiguration()
+        let initialPimSession = base == nil ? PimSessionStore.initialSessionID : nil
+
         // The window we manage is not restorable if we've specified a command
         // to execute. We do this because the restored window is meaningless at the
         // time of writing this: it'd just restore to a shell in the same directory
         // as the script. We may want to revisit this behavior when we have scrollback
         // restoration.
-        self.restorable = (base?.command ?? "") == ""
+        self.restorable = (pimBase.command ?? "") == ""
 
         // Setup our initial derived config based on the current app config
         self.derivedConfig = DerivedConfig(ghostty.config)
+        self.currentPimSession = initialPimSession
 
-        super.init(ghostty, baseConfig: base, surfaceTree: tree)
+        super.init(ghostty, baseConfig: pimBase, surfaceTree: tree)
 
         // Setup our notifications for behaviors
         let center = NotificationCenter.default
@@ -140,6 +167,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     }
 
     deinit {
+        pimProcessMonitor?.invalidate()
         // Remove all of our notificationcenter subscriptions
         let center = NotificationCenter.default
         center.removeObserver(self)
@@ -190,7 +218,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         _ newTree: SplitTree<Ghostty.SurfaceView>,
         moveFocusTo newView: Ghostty.SurfaceView? = nil,
         moveFocusFrom oldView: Ghostty.SurfaceView? = nil,
-        undoAction: String? = nil
+        undoAction: String? = nil,
+        registerUndo: Bool = true
     ) {
         // We have a special case if our tree is empty to close our tab immediately.
         // This makes it so that undo is handled properly.
@@ -203,7 +232,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             newTree,
             moveFocusTo: newView,
             moveFocusFrom: oldView,
-            undoAction: undoAction)
+            undoAction: undoAction,
+            registerUndo: registerUndo)
     }
 
     // MARK: Terminal Creation
@@ -621,6 +651,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         // Sync our zoom state for splits
         window.surfaceIsZoomed = surfaceTree.zoomed != nil
+        pimTerminalAppearance.update(
+            backgroundColor: surfaceConfig.backgroundColor,
+            backgroundOpacity: surfaceConfig.backgroundOpacity,
+            backgroundBlur: surfaceConfig.backgroundBlur)
 
         // Set the font for the window and tab titles.
         if let titleFontName = surfaceConfig.windowTitleFontFamily {
@@ -631,6 +665,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         // Call this last in case it uses any of the properties above.
         window.syncAppearance(surfaceConfig)
+        if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
+            // Pim follows the system appearance. Ghostty's configured window
+            // theme must not pin the window to dark or light mode.
+            NSApplication.shared.appearance = nil
+            window.appearance = nil
+            // Pim owns the glass composition. Ghostty's normal appearance
+            // sync can otherwise restore an opaque window during launch,
+            // leaving the initial sidebar different from the toggled state.
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = true
+        }
         terminalViewContainer?.ghosttyConfigDidChange(ghostty.config, preferredBackgroundColor: window.preferredBackgroundColor)
     }
 
@@ -1051,6 +1097,375 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
     }
 
+    private func openPimSession(_ session: PimSession) {
+        if currentPimSession == session.id,
+           pimSurfaceKinds[session.id] == .pi,
+           let current = pimSurfaces[session.id],
+           !current.processExited {
+            return
+        }
+
+        cancelPendingPimLaunch()
+        let launchGeneration = pimLaunchGeneration
+        pimPendingSession = session
+        retainCurrentPimSurfaceIfNeeded()
+
+        if let cached = pimSurfaces[session.id],
+           pimSurfaceKinds[session.id] == .pi,
+           !cached.processExited {
+            pimPendingSession = nil
+            pimPendingSurface = nil
+            pimPendingStartedAt = nil
+            pimReadySessions.insert(session.id)
+            showPimSurface(cached, for: session, showLoading: false)
+            return
+        }
+
+        guard let ghosttyApp = ghostty.app else { return }
+        pimSessionStore.requestActiveSession(session.id)
+        // Surface creation is deferred so the selection callback can return
+        // before Ghostty starts the new Pi process. The old surface remains
+        // in the tree until the new Pi process publishes its ready status.
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.pimLaunchGeneration == launchGeneration,
+                  self.pimPendingSession?.id == session.id else { return }
+            let view = self.makePimSurface(session, app: ghosttyApp)
+            self.beginPimSurface(view, for: session)
+            self.startPimProcess(view, for: session, generation: launchGeneration)
+            self.finishPendingPimSurfaceIfReady()
+        }
+    }
+
+    private func makePimSurface(_ session: PimSession, app: ghostty_app_t) -> Ghostty.SurfaceView {
+        var config = Ghostty.SurfaceConfiguration()
+        config.workingDirectory = session.cwd
+        // Start a shell first. Pi is started after the surface returns to the
+        // run loop so a large session cannot block AppKit during construction.
+        config.command = PimSessionStore.pimBootstrapShellCommand()
+        config.environmentVariables = PimSessionStore.childEnvironment()
+        return Ghostty.SurfaceView(app, baseConfig: config)
+    }
+
+    private func startPimProcess(
+        _ view: Ghostty.SurfaceView,
+        for session: PimSession,
+        generation: Int
+    ) {
+        let launch = { [weak self, weak view] in
+            guard let self, let view,
+                  self.pimLaunchGeneration == generation,
+                  self.pimPendingSurface === view,
+                  self.pimPendingSession?.id == session.id,
+                  !view.processExited else { return }
+            view.surfaceModel?.sendPimResume(PimSessionStore.launchInput(for: session))
+        }
+
+        guard let targetSize = focusedSurface?.surfaceSize,
+              targetSize.width_px > 0,
+              targetSize.height_px > 0,
+              let surfaceModel = view.surfaceModel else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: launch)
+            return
+        }
+
+        // Match the visible terminal size before Pi replays the transcript.
+        // Otherwise Pi first renders at the 800x600 bootstrap size and then
+        // reflows again when the surface enters the split view.
+        surfaceModel.sendPimSurfaceSize(
+            width: targetSize.width_px,
+            height: targetSize.height_px) { [weak view] size in
+                view?.surfaceSize = size
+                DispatchQueue.main.async(execute: launch)
+            }
+    }
+
+    private func beginPimSurface(_ view: Ghostty.SurfaceView, for session: PimSession) {
+        pimSurfaces[session.id] = view
+        pimSurfaceKinds[session.id] = .pi
+        observePimSurface(view, for: session)
+        pimPendingSession = session
+        pimPendingSurface = view
+        pimPendingStartedAt = Date()
+    }
+
+    private func observePimSurface(_ view: Ghostty.SurfaceView, for session: PimSession) {
+        pimSurfaceExitCancellables[session.id] = view.$childExitedMessage
+            .compactMap { $0 }
+            .sink { [weak self, weak view] _ in
+                guard let self, let view else { return }
+                if self.pimPendingSession?.id == session.id,
+                   self.pimPendingSurface === view {
+                    self.failPendingPimLaunch(
+                        session,
+                        view: view,
+                        message: "Pi exited before this chat could be opened.")
+                } else {
+                    self.handoffToShellIfNeeded(view, for: session)
+                }
+            }
+    }
+
+    private func finishPendingPimSurfaceIfReady() {
+        guard let session = pimPendingSession,
+              let view = pimPendingSurface,
+              pimSurfaces[session.id] === view else { return }
+
+        if view.processExited {
+            failPendingPimLaunch(
+                session,
+                view: view,
+                message: "Pi exited before this chat could be opened.")
+            return
+        }
+
+        // The bridge publishes this only after Pi has loaded the session and
+        // initialized its interactive mode. Do not replace the visible
+        // terminal before that point.
+        if pimSessionStore.ownedSessions.contains(session.id) {
+            pimPendingSession = nil
+            pimPendingSurface = nil
+            pimPendingStartedAt = nil
+            pimReadySessions.insert(session.id)
+            showPimSurface(view, for: session, showLoading: false)
+            return
+        }
+
+        // A missing bridge/status file is a launch failure, not a reason to
+        // expose a shell. This also prevents an infinite loading state.
+        if let started = pimPendingStartedAt,
+           Date().timeIntervalSince(started) > 10 {
+            failPendingPimLaunch(
+                session,
+                view: view,
+                message: "Pi did not become ready within 10 seconds.")
+        }
+    }
+
+    private func failPendingPimLaunch(
+        _ session: PimSession,
+        view: Ghostty.SurfaceView,
+        message: String
+    ) {
+        guard pimPendingSession?.id == session.id,
+              pimPendingSurface === view,
+              pimSurfaces[session.id] === view else { return }
+        stopPimSurface(view)
+        pimSurfaceExitCancellables.removeValue(forKey: session.id)
+        pimSurfaces.removeValue(forKey: session.id)
+        pimSurfaceKinds.removeValue(forKey: session.id)
+        pimReadySessions.remove(session.id)
+        pimPendingSession = nil
+        pimPendingSurface = nil
+        pimPendingStartedAt = nil
+        pimSessionStore.reportLaunchFailure(session.id, message: message)
+    }
+
+    private func cancelPendingPimLaunch() {
+        pimLaunchGeneration += 1
+        guard let session = pimPendingSession else { return }
+        if let view = pimPendingSurface,
+           pimSurfaces[session.id] === view {
+            stopPimSurface(view)
+            pimSurfaceExitCancellables.removeValue(forKey: session.id)
+            pimSurfaces.removeValue(forKey: session.id)
+            pimSurfaceKinds.removeValue(forKey: session.id)
+            pimReadySessions.remove(session.id)
+        }
+        pimPendingSession = nil
+        pimPendingSurface = nil
+        pimPendingStartedAt = nil
+    }
+
+    private func stopPimSurface(_ view: Ghostty.SurfaceView) {
+        guard !view.processExited,
+              let surface = view.surface else { return }
+        ghostty.requestClose(surface: surface)
+    }
+
+    private func makePimShellSurface(_ session: PimSession, app: ghostty_app_t) -> Ghostty.SurfaceView {
+        var config = Ghostty.SurfaceConfiguration()
+        config.workingDirectory = session.cwd
+        config.command = PimSessionStore.shellCommand()
+        return Ghostty.SurfaceView(app, baseConfig: config)
+    }
+
+    private func handoffExitedPimSurfaceIfNeeded() {
+        finishPendingPimSurfaceIfReady()
+        guard let sessionID = currentPimSession,
+              pimSurfaceKinds[sessionID] == .pi,
+              pimReadySessions.contains(sessionID),
+              let session = pimSessionStore.sessions.first(where: { $0.id == sessionID }),
+              let surface = pimSurfaces[sessionID],
+              surface.processExited else { return }
+        handoffToShellIfNeeded(surface, for: session)
+    }
+
+    private func handoffToShellIfNeeded(
+        _ exitedView: Ghostty.SurfaceView,
+        for session: PimSession
+    ) {
+        guard pimSurfaces[session.id] === exitedView,
+              pimSurfaceKinds[session.id] == .pi,
+              let ghosttyApp = ghostty.app else { return }
+
+        // Ctrl-C/Ctrl-D leaves Pi, but it should hand the pane to a normal
+        // shell instead of exposing Ghostty's disposable process screen.
+        pimSurfaceExitCancellables.removeValue(forKey: session.id)
+        pimReadySessions.remove(session.id)
+        let shell = makePimShellSurface(session, app: ghosttyApp)
+        pimSurfaces[session.id] = shell
+        pimSurfaceKinds[session.id] = .shell
+        if currentPimSession == session.id {
+            pimSessionStore.requestActiveSession(session.id, showLoading: false)
+            pimForegroundSurface = shell
+            pimForegroundSession = session.id
+            replaceSurfaceTree(
+                .init(view: shell),
+                moveFocusTo: shell,
+                moveFocusFrom: focusedSurface,
+                registerUndo: false)
+        }
+    }
+
+    private func showPimSurface(
+        _ view: Ghostty.SurfaceView,
+        for session: PimSession,
+        showLoading: Bool = true
+    ) {
+        pimReadySessions.insert(session.id)
+        pimForegroundSurface = view
+        pimForegroundSession = session.id
+        pimSessionStore.requestActiveSession(session.id, showLoading: showLoading)
+        currentPimSession = session.id
+        replaceSurfaceTree(
+            .init(view: view),
+            moveFocusTo: view,
+            moveFocusFrom: focusedSurface,
+            registerUndo: false)
+    }
+
+    private func retainCurrentPimSurfaceIfNeeded() {
+        guard let focusedSurface else { return }
+        if let currentSession = currentPimSession ?? pimSessionStore.activeSession {
+            if pimSurfaceKinds[currentSession] == .pi {
+                pimSurfaces[currentSession] = focusedSurface
+            } else {
+                // A normal shell is intentionally ephemeral when switching
+                // back to a Pi chat; the chat will launch Pi again on return.
+                pimSurfaces.removeValue(forKey: currentSession)
+                pimSurfaceKinds.removeValue(forKey: currentSession)
+                pimSurfaceExitCancellables.removeValue(forKey: currentSession)
+                pimReadySessions.remove(currentSession)
+            }
+        } else {
+            untrackedPimSurface = focusedSurface
+        }
+    }
+
+    private func canClosePimSession(_ session: PimSession) -> Bool {
+        guard pimSurfaceKinds[session.id] == .pi,
+              pimReadySessions.contains(session.id) else { return false }
+        return pimSurfaces[session.id] != nil
+    }
+
+    private func closePimSession(_ session: PimSession) {
+        guard canClosePimSession(session),
+              let view = pimSurfaces[session.id] else { return }
+
+        if view.processExited {
+            finishClosingPimSession(session, view: view)
+            return
+        }
+
+        confirmClose(
+            messageText: "Close Terminal?",
+            informativeText: "The Pi process is still running. If you close this terminal the process will be killed.") { [weak self, weak view] in
+                guard let self, let view else { return }
+                self.finishClosingPimSession(session, view: view)
+            }
+    }
+
+    private func finishClosingPimSession(
+        _ session: PimSession,
+        view: Ghostty.SurfaceView
+    ) {
+        guard pimSurfaces[session.id] === view,
+              pimSurfaceKinds[session.id] == .pi else { return }
+
+        let wasCurrent = currentPimSession == session.id
+        let replacement: (PimSession, Ghostty.SurfaceView)? = if wasCurrent {
+            pimSessionStore.sessions.lazy.compactMap { [self] candidate in
+                guard candidate.id != session.id,
+                      self.pimSurfaceKinds[candidate.id] == .pi,
+                      self.pimReadySessions.contains(candidate.id),
+                      let candidateView = self.pimSurfaces[candidate.id],
+                      !candidateView.processExited else { return nil }
+                return (candidate, candidateView)
+            }.first
+        } else {
+            nil
+        }
+
+        pimSurfaceExitCancellables.removeValue(forKey: session.id)
+        pimSurfaces.removeValue(forKey: session.id)
+        pimSurfaceKinds.removeValue(forKey: session.id)
+        pimReadySessions.remove(session.id)
+        if pimPendingSession?.id == session.id {
+            pimPendingSession = nil
+            pimPendingSurface = nil
+            pimPendingStartedAt = nil
+        }
+
+        // Swap the visible surface before asking Ghostty to close the old one.
+        // Cached Pim surfaces are normally outside surfaceTree, and an empty
+        // tree would close the Pim window instead of showing its empty state.
+        if wasCurrent {
+            if let replacement {
+                showPimSurface(replacement.1, for: replacement.0, showLoading: false)
+            } else {
+                showPimEmptyState()
+            }
+        }
+        stopPimSurface(view)
+    }
+
+    private func showPimEmptyState() {
+        let shell: Ghostty.SurfaceView
+        if let existing = untrackedPimSurface, !existing.processExited {
+            shell = existing
+        } else {
+            guard let app = ghostty.app else {
+                pimSessionStore.clearActiveSession()
+                currentPimSession = nil
+                pimForegroundSurface = nil
+                pimForegroundSession = nil
+                return
+            }
+            shell = Ghostty.SurfaceView(app, baseConfig: PimSessionStore.initialConfiguration())
+        }
+        untrackedPimSurface = nil
+        pimSessionStore.clearActiveSession()
+        currentPimSession = nil
+        pimForegroundSurface = shell
+        pimForegroundSession = nil
+        replaceSurfaceTree(
+            .init(view: shell),
+            moveFocusTo: shell,
+            moveFocusFrom: focusedSurface,
+            registerUndo: false)
+    }
+
+    private func newPimChat() {
+        guard let session = pimSessionStore.createNewSession(
+            cwd: PimSessionStore.workspaceDirectory()) else { return }
+        pimSessionStore.markRead(session)
+        // Use the same deferred launch path as existing chats. Creating a
+        // surface synchronously from the plus button can race Ghostty's run
+        // loop before its model and final size are ready.
+        openPimSession(session)
+    }
+
     // MARK: - NSWindowController
 
     override func windowWillLoad() {
@@ -1061,12 +1476,19 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     override func windowDidLoad() {
         super.windowDidLoad()
         guard let window else { return }
+        PimBranding.installMenuTitles()
 
         // I copy this because we may change the source in the future but also because
         // I regularly audit our codebase for "ghostty.config" access because generally
         // you shouldn't use it. Its safe in this case because for a new window we should
         // use whatever the latest app-level config is.
         let config = ghostty.config
+
+        if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
+            // Pim follows the user's macOS appearance instead of locking the
+            // application to the terminal's configured window theme.
+            NSApplication.shared.appearance = nil
+        }
 
         // Setting all three of these is required for restoration to work.
         window.isRestorable = restorable
@@ -1083,9 +1505,38 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             focusedSurface = view
         }
 
+        // The child-exit message is the normal path. This monitor is a small
+        // fallback for exits that Ghostty reports without publishing that
+        // message (notably quick Ctrl-C exits).
+        pimProcessMonitor?.invalidate()
+        pimProcessMonitor = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            self?.handoffExitedPimSurfaceIfNeeded()
+        }
+
         // Initialize our content view to the SwiftUI root
         let container = TerminalViewContainer {
-            TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
+            PimWorkspace(
+                store: pimSessionStore,
+                ghostty: ghostty,
+                viewModel: self,
+                delegate: self,
+                appearance: pimTerminalAppearance,
+                sidebarVisibility: pimSidebarVisibility,
+                searchState: pimSearchState,
+                onAppearanceChange: { [weak self] in
+                    // The surface color-scheme update already propagates
+                    // through Ghostty's appearance notification. Calling
+                    // syncAppearance here would recursively change the
+                    // window appearance while SwiftUI is updating the view.
+                    self?.updateColorSchemeForSurfaceTree()
+                },
+                onOpen: { [weak self] session in
+                    self?.pimSessionStore.markRead(session)
+                    self?.openPimSession(session)
+                },
+                onNew: { [weak self] in self?.newPimChat() },
+                onClose: { [weak self] session in self?.closePimSession(session) },
+                canClose: { [weak self] session in self?.canClosePimSession(session) ?? false })
         }
 
         // Set the initial content size on the container so that
@@ -1095,7 +1546,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         container.initialContentSize = focusedSurface?.initialSize
 
         window.contentView = container
-
+        if pimSidebarAccessory == nil {
+            let accessory = PimSidebarAccessoryViewController(visibility: pimSidebarVisibility)
+            window.addTitlebarAccessoryViewController(accessory)
+            pimSidebarAccessory = accessory
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.pimForegroundSurface == nil,
+                  let surface = self.focusedSurface,
+                  !surface.processExited else { return }
+            self.pimForegroundSurface = surface
+            self.pimForegroundSession = self.currentPimSession
+        }
         // If we have a default size, we want to apply it.
         if let defaultSize {
             defaultSize.apply(to: window)

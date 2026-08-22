@@ -1,4 +1,64 @@
+import Foundation
 import GhosttyKit
+
+private final class PimSurfaceResizeScheduler: @unchecked Sendable {
+    private struct Request {
+        let surface: ghostty_surface_t
+        let width: UInt32
+        let height: UInt32
+        let completion: (ghostty_surface_size_s) -> Void
+    }
+
+    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "com.pim.surface-resize", qos: .userInteractive)
+    private var pending: Request?
+    private var draining = false
+
+    func submit(
+        surface: ghostty_surface_t,
+        width: UInt32,
+        height: UInt32,
+        completion: @escaping (ghostty_surface_size_s) -> Void
+    ) {
+        lock.lock()
+        pending = Request(surface: surface, width: width, height: height, completion: completion)
+        let shouldStart = !draining
+        draining = true
+        lock.unlock()
+        if shouldStart {
+            // During a live resize AppKit can produce a long stream of
+            // intermediate sizes. Let that burst settle before touching
+            // libghostty so its IO mailbox receives one useful resize.
+            queue.asyncAfter(deadline: .now() + .milliseconds(50)) { [self] in drain() }
+        }
+    }
+
+    private func drain() {
+        while true {
+            lock.lock()
+            guard let request = pending else {
+                draining = false
+                lock.unlock()
+                return
+            }
+            pending = nil
+            lock.unlock()
+
+            ghostty_surface_set_size(request.surface, request.width, request.height)
+            let size = ghostty_surface_size(request.surface)
+            DispatchQueue.main.async {
+                request.completion(size)
+            }
+
+            lock.lock()
+            let morePending = pending != nil
+            if !morePending { draining = false }
+            lock.unlock()
+            if !morePending { return }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+    }
+}
 
 extension Ghostty {
     /// Represents a single surface within Ghostty.
@@ -13,6 +73,13 @@ extension Ghostty {
         /// A surface is sendable because it is just a reference type. Using the surface in parameters
         /// may be unsafe but the value itself is safe to send across threads.
         nonisolated(unsafe) private let surface: ghostty_surface_t
+        private let pimResizeScheduler = PimSurfaceResizeScheduler()
+        private static let pimInputQueue = DispatchQueue(
+            label: "com.pim.surface-input",
+            qos: .userInteractive)
+        private static let pimCommandQueue = DispatchQueue(
+            label: "com.pim.surface-command",
+            qos: .userInteractive)
 
         /// Read the underlying C value for this surface. This is unsafe because the value will be
         /// freed when the Surface class is deinitialized.
@@ -41,6 +108,55 @@ extension Ghostty {
             let surface = self.surface
             Task.detached { @MainActor in
                 ghostty_surface_free(surface)
+            }
+        }
+
+        /// Submit a Pim surface resize without blocking AppKit on libghostty.
+        /// Only the newest pending size is retained while a resize is in flight.
+        nonisolated func sendPimSurfaceSize(
+            width: UInt32,
+            height: UInt32,
+            completion: @escaping (ghostty_surface_size_s) -> Void
+        ) {
+            pimResizeScheduler.submit(
+                surface: surface,
+                width: width,
+                height: height,
+                completion: completion)
+        }
+
+        /// Send text for a Pim session switch. This only queues bytes to the
+        /// PTY; it does not synchronously update AppKit state. Keep it off the
+        /// main actor so a busy terminal renderer cannot stall AppKit while Pi
+        /// is starting.
+        nonisolated func sendPimResume(_ text: String) {
+            let length = text.utf8CString.count
+            guard length > 1 else { return }
+            Self.pimCommandQueue.async { [self] in
+                text.withCString { ptr in
+                    ghostty_surface_text(self.surface, ptr, UInt(length - 1))
+                }
+            }
+        }
+
+        /// Send Pim focus state from AppKit's main actor. Do not move this to a
+        /// background queue: focus changes can synchronously update SwiftUI state.
+        nonisolated func sendPimFocus(_ focused: Bool) {
+            ghostty_surface_set_focus(surface, focused)
+        }
+
+        /// Send Pim mouse button events from AppKit's main actor. libghostty may
+        /// emit UI actions while handling the event, so these must not run on a
+        /// background queue.
+        nonisolated func sendPimMouseButton(
+            _ state: ghostty_input_mouse_state_e,
+            _ button: ghostty_input_mouse_button_e,
+            _ mods: ghostty_input_mods_e,
+            releasePressure: Bool = false
+        ) {
+            ghostty_surface_mouse_button(surface, state, button, mods)
+            if releasePressure {
+                ghostty_surface_mouse_pressure(surface, 0, 0)
             }
         }
 
@@ -141,6 +257,17 @@ extension Ghostty {
         /// - Parameter event: The mouse position event to send to the terminal
         @MainActor
         func sendMousePos(_ event: Input.MousePosEvent) {
+            if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
+                // Keep terminal link hit-testing off AppKit. Its UI actions are
+                // marshalled back to the main actor by Ghostty.App below.
+                let x = event.x
+                let y = event.y
+                let mods = event.mods.cMods
+                Self.pimInputQueue.async { [self] in
+                    ghostty_surface_mouse_pos(self.surface, x, y, mods)
+                }
+                return
+            }
             ghostty_surface_mouse_pos(
                 surface,
                 event.x,
@@ -157,6 +284,15 @@ extension Ghostty {
         /// - Parameter event: The mouse scroll event to send to the terminal
         @MainActor
         func sendMouseScroll(_ event: Input.MouseScrollEvent) {
+            if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
+                let x = event.x
+                let y = event.y
+                let mods = event.mods.cScrollMods
+                Self.pimInputQueue.async { [self] in
+                    ghostty_surface_mouse_scroll(self.surface, x, y, mods)
+                }
+                return
+            }
             ghostty_surface_mouse_scroll(
                 surface,
                 event.x,

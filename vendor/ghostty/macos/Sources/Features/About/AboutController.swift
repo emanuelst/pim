@@ -12,7 +12,12 @@ class AboutController: NSWindowController, NSWindowDelegate {
         guard let window = window else { return }
         window.center()
         window.isMovableByWindowBackground = true
-        window.contentView = NSHostingView(rootView: AboutView().environmentObject(viewModel))
+        if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
+            window.contentView = NSHostingView(rootView: PimAboutView())
+            window.title = "Pim"
+        } else {
+            window.contentView = NSHostingView(rootView: AboutView().environmentObject(viewModel))
+        }
         window.titlebarAppearsTransparent = true
     }
 
@@ -20,7 +25,9 @@ class AboutController: NSWindowController, NSWindowDelegate {
 
     func show() {
         window?.makeKeyAndOrderFront(nil)
-        viewModel.startCyclingIcons()
+        if Bundle.main.bundleURL.lastPathComponent != "Pim.app" {
+            viewModel.startCyclingIcons()
+        }
     }
 
     func hide() {

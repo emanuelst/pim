@@ -51,14 +51,16 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
             styleMask = Self.hiddenStyleMask
         }
 
-        // Hide the title
+        let isPim = Bundle.main.bundleURL.lastPathComponent == "Pim.app"
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
 
-        // Hide the traffic lights (window control buttons)
-        standardWindowButton(.closeButton)?.isHidden = true
-        standardWindowButton(.miniaturizeButton)?.isHidden = true
-        standardWindowButton(.zoomButton)?.isHidden = true
+        isMovableByWindowBackground = false
+        if !isPim {
+            standardWindowButton(.closeButton)?.isHidden = true
+            standardWindowButton(.miniaturizeButton)?.isHidden = true
+            standardWindowButton(.zoomButton)?.isHidden = true
+        }
 
         // Disallow tabbing if the titlebar is hidden, since that will (should) also hide the tab bar.
         tabbingMode = .disallowed
@@ -66,7 +68,8 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
         // Nuke it from orbit -- hide the titlebar container entirely, just in case. There are
         // some operations that appear to bring back the titlebar visibility so this ensures
         // it is gone forever.
-        if let themeFrame = contentView?.superview,
+        if !isPim,
+           let themeFrame = contentView?.superview,
            let titleBarContainer = themeFrame.firstDescendant(withClassName: "NSTitlebarContainerView") {
             titleBarContainer.isHidden = true
         }
@@ -88,9 +91,8 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
 
     override var title: String {
         didSet {
-            // Updating the title text as above automatically reveals the
-            // native title view in macOS 15.0 and above. Since we're using
-            // a custom view instead, we need to re-hide it.
+            // Updating the hidden titlebar policy after the title changes keeps
+            // the native title view from reappearing.
             reapplyHiddenStyle()
         }
     }
@@ -99,6 +101,13 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
     // area is not draggable.
     override var contentLayoutRect: CGRect {
         var rect = super.contentLayoutRect
+        if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
+            // Pim owns a single compact content toolbar. Let it extend under
+            // the transparent native titlebar instead of stacking below it.
+            rect.origin.y = 0
+            rect.size.height = self.frame.height
+            return rect
+        }
         rect.origin.y = 0
         rect.size.height = self.frame.height
         return rect

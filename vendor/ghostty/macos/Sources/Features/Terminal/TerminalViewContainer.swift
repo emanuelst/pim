@@ -6,6 +6,15 @@ import SwiftUI
 class TerminalViewContainer: NSView {
     private let terminalView: NSView
 
+    override var safeAreaInsets: NSEdgeInsets {
+        // Pim draws its compact content toolbar under the transparent native
+        // titlebar. Do not inject a second SwiftUI top inset there.
+        if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
+            return NSEdgeInsetsZero
+        }
+        return super.safeAreaInsets
+    }
+
     /// Background color applied with glass effect
     private(set) var glassEffectView: NSView?
     private var derivedConfig: DerivedConfig?

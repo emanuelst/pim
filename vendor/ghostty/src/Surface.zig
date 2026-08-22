@@ -2527,8 +2527,9 @@ fn resize(self: *Surface, size: rendererpkg.ScreenSize) !void {
             "set. Is your padding reasonable?", .{});
     }
 
-    // Mail the IO thread
-    self.queueIo(.{ .resize = self.size }, .unlocked);
+    // Resize is latest-wins and must bypass ordinary input backlog. A large
+    // tool result can otherwise delay the visible terminal reflow by seconds.
+    self.io.queueResize(self.size);
 }
 
 /// Recalculate the balanced padding if needed.

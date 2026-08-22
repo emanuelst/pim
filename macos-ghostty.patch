@@ -99,7 +99,7 @@ new file mode 100644
 index 0000000..d4e298b
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1674 @@
+@@ -0,0 +1,1698 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -578,6 +578,15 @@ index 0000000..d4e298b
 +        activeSessionBeforeRequest = nil
 +        launchFailureSession = session
 +        launchFailureMessage = message
++    }
++
++    func clearActiveSession() {
++        requestedActiveSession = nil
++        activeSessionBeforeRequest = nil
++        switchingTo = nil
++        activeSession = nil
++        launchFailureSession = nil
++        launchFailureMessage = nil
 +    }
 +
 +    private nonisolated static func loadStatus() -> PimStatusSnapshot {
@@ -1509,6 +1518,8 @@ index 0000000..d4e298b
 +    @AppStorage("Pim.superGlass") private var superGlass = false
 +    let onOpen: (PimSession) -> Void
 +    let onNew: () -> Void
++    let onClose: (PimSession) -> Void
++    let canClose: (PimSession) -> Bool
 +
 +    var body: some View {
 +        ZStack(alignment: .top) {
@@ -1518,7 +1529,9 @@ index 0000000..d4e298b
 +                        store: store,
 +                        searchState: searchState,
 +                        onOpen: onOpen,
-+                        onNew: onNew)
++                        onNew: onNew,
++                        onClose: onClose,
++                        canClose: canClose)
 +                }
 +                VStack(spacing: 0) {
 +                    PimTitleBar(store: store, appearance: appearance)
@@ -1563,6 +1576,8 @@ index 0000000..d4e298b
 +    @AppStorage("Pim.superGlass") private var superGlass = false
 +    let onOpen: (PimSession) -> Void
 +    let onNew: () -> Void
++    let onClose: (PimSession) -> Void
++    let canClose: (PimSession) -> Bool
 +
 +    var body: some View {
 +        VStack(spacing: 0) {
@@ -1615,7 +1630,10 @@ index 0000000..d4e298b
 +            .listStyle(.sidebar)
 +            .scrollContentBackground(.hidden)
 +            .onChange(of: store.activeSession) { activeSession in
-+                guard let activeSession else { return }
++                guard let activeSession else {
++                    selection = nil
++                    return
++                }
 +                DispatchQueue.main.async {
 +                    guard selection != activeSession else { return }
 +                    programmaticSelection = activeSession
@@ -1748,6 +1766,12 @@ index 0000000..d4e298b
 +                    store.markRead(session)
 +                } else {
 +                    store.markUnread(session)
++                }
++            }
++            if store.ownedSessions.contains(session.id), canClose(session) {
++                Divider()
++                Button("Close Terminal…") {
++                    onClose(session)
 +                }
 +            }
 +        }
@@ -1920,7 +1944,7 @@ index 340a0b4..3d73e87 100644
          terminalViewContainer?.ghosttyConfigDidChange(ghostty.config, preferredBackgroundColor: window.preferredBackgroundColor)
      }
  
-@@ -1051,6 +1097,282 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1097,375 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
  
@@ -2190,6 +2214,99 @@ index 340a0b4..3d73e87 100644
 +        }
 +    }
 +
++    private func canClosePimSession(_ session: PimSession) -> Bool {
++        guard pimSurfaceKinds[session.id] == .pi,
++              pimReadySessions.contains(session.id) else { return false }
++        return pimSurfaces[session.id] != nil
++    }
++
++    private func closePimSession(_ session: PimSession) {
++        guard canClosePimSession(session),
++              let view = pimSurfaces[session.id] else { return }
++
++        if view.processExited {
++            finishClosingPimSession(session, view: view)
++            return
++        }
++
++        confirmClose(
++            messageText: "Close Terminal?",
++            informativeText: "The Pi process is still running. If you close this terminal the process will be killed.") { [weak self, weak view] in
++                guard let self, let view else { return }
++                self.finishClosingPimSession(session, view: view)
++            }
++    }
++
++    private func finishClosingPimSession(
++        _ session: PimSession,
++        view: Ghostty.SurfaceView
++    ) {
++        guard pimSurfaces[session.id] === view,
++              pimSurfaceKinds[session.id] == .pi else { return }
++
++        let wasCurrent = currentPimSession == session.id
++        let replacement: (PimSession, Ghostty.SurfaceView)? = if wasCurrent {
++            pimSessionStore.sessions.lazy.compactMap { [self] candidate in
++                guard candidate.id != session.id,
++                      self.pimSurfaceKinds[candidate.id] == .pi,
++                      self.pimReadySessions.contains(candidate.id),
++                      let candidateView = self.pimSurfaces[candidate.id],
++                      !candidateView.processExited else { return nil }
++                return (candidate, candidateView)
++            }.first
++        } else {
++            nil
++        }
++
++        pimSurfaceExitCancellables.removeValue(forKey: session.id)
++        pimSurfaces.removeValue(forKey: session.id)
++        pimSurfaceKinds.removeValue(forKey: session.id)
++        pimReadySessions.remove(session.id)
++        if pimPendingSession?.id == session.id {
++            pimPendingSession = nil
++            pimPendingSurface = nil
++            pimPendingStartedAt = nil
++        }
++
++        // Swap the visible surface before asking Ghostty to close the old one.
++        // Cached Pim surfaces are normally outside surfaceTree, and an empty
++        // tree would close the Pim window instead of showing its empty state.
++        if wasCurrent {
++            if let replacement {
++                showPimSurface(replacement.1, for: replacement.0, showLoading: false)
++            } else {
++                showPimEmptyState()
++            }
++        }
++        stopPimSurface(view)
++    }
++
++    private func showPimEmptyState() {
++        let shell: Ghostty.SurfaceView
++        if let existing = untrackedPimSurface, !existing.processExited {
++            shell = existing
++        } else {
++            guard let app = ghostty.app else {
++                pimSessionStore.clearActiveSession()
++                currentPimSession = nil
++                pimForegroundSurface = nil
++                pimForegroundSession = nil
++                return
++            }
++            shell = Ghostty.SurfaceView(app, baseConfig: PimSessionStore.initialConfiguration())
++        }
++        untrackedPimSurface = nil
++        pimSessionStore.clearActiveSession()
++        currentPimSession = nil
++        pimForegroundSurface = shell
++        pimForegroundSession = nil
++        replaceSurfaceTree(
++            .init(view: shell),
++            moveFocusTo: shell,
++            moveFocusFrom: focusedSurface,
++            registerUndo: false)
++    }
++
 +    private func newPimChat() {
 +        guard let session = pimSessionStore.createNewSession(
 +            cwd: PimSessionStore.workspaceDirectory()) else { return }
@@ -2203,7 +2320,7 @@ index 340a0b4..3d73e87 100644
      // MARK: - NSWindowController
  
      override func windowWillLoad() {
-@@ -1061,6 +1383,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1061,6 +1476,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      override func windowDidLoad() {
          super.windowDidLoad()
          guard let window else { return }
@@ -2211,7 +2328,7 @@ index 340a0b4..3d73e87 100644
  
          // I copy this because we may change the source in the future but also because
          // I regularly audit our codebase for "ghostty.config" access because generally
-@@ -1068,6 +1391,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1068,6 +1485,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          // use whatever the latest app-level config is.
          let config = ghostty.config
  
@@ -2224,7 +2341,7 @@ index 340a0b4..3d73e87 100644
          // Setting all three of these is required for restoration to work.
          window.isRestorable = restorable
          if restorable {
-@@ -1083,9 +1412,36 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1083,9 +1512,38 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              focusedSurface = view
          }
  
@@ -2258,11 +2375,13 @@ index 340a0b4..3d73e87 100644
 +                    self?.pimSessionStore.markRead(session)
 +                    self?.openPimSession(session)
 +                },
-+                onNew: { [weak self] in self?.newPimChat() })
++                onNew: { [weak self] in self?.newPimChat() },
++                onClose: { [weak self] session in self?.closePimSession(session) },
++                canClose: { [weak self] session in self?.canClosePimSession(session) ?? false })
          }
  
          // Set the initial content size on the container so that
-@@ -1095,7 +1451,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1580,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
  
          window.contentView = container

@@ -1310,6 +1310,7 @@ extension AppDelegate: NSMenuItemValidation {
 
 extension AppDelegate {
     func terminate() -> NSApplication.TerminateReply {
+        let applicationName = Bundle.main.bundleURL.lastPathComponent == "Pim.app" ? "Pim" : "Ghostty"
         let controllersNeedConfirmation = NSApplication.shared.windows
             .compactMap { $0.windowController as? BaseTerminalController }
             .filter { !$0.windowCanBeClosedWithoutConfirmation() }
@@ -1321,7 +1322,7 @@ extension AppDelegate {
         if controllersNeedConfirmation.count == 1 {
             Task {
                 let response = await controllersNeedConfirmation[0].confirmCloseAsync(
-                    messageText: "Quit Ghostty?",
+                    messageText: "Quit \(applicationName)?",
                     informativeText: "The terminal still has a running process. If you quit, the process will be killed.",
                     confirmButtonTitle: "Terminate",
                 )
@@ -1359,7 +1360,7 @@ extension AppDelegate {
         Task {
             for controller in controllers {
                 let response = await controller.confirmCloseAsync(
-                    messageText: "Quit Ghostty?",
+                    messageText: "Quit \(Bundle.main.bundleURL.lastPathComponent == "Pim.app" ? "Pim" : "Ghostty")?",
                     informativeText: "The terminal still has a running process. If you quit, the process will be killed.",
                     confirmButtonTitle: "Terminate",
                 )

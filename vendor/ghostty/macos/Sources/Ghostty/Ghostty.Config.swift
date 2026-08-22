@@ -349,6 +349,9 @@ extension Ghostty {
         }
 
         var macosTitlebarStyle: MacOSTitlebarStyle {
+            if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
+                return .hidden
+            }
             let defaultValue = MacOSTitlebarStyle.transparent
             guard let config = self.config else { return defaultValue }
             var v: UnsafePointer<Int8>?

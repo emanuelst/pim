@@ -61,6 +61,20 @@ macOS user or a virtual machine. Pim also accepts `PIM_AGENT_DIR`, Pi's
 `PI_CODING_AGENT_DIR`, and `PIM_WORKSPACE_DIR` when you want to choose alternate
 locations yourself.
 
+## Updating Ghostty
+
+Ghostty is tracked in `vendor/ghostty` as a Git subtree. To pull a newer
+upstream snapshot:
+
+```sh
+git subtree pull --prefix=vendor/ghostty \
+  https://github.com/ghostty-org/ghostty.git main --squash
+```
+
+Resolve any conflicts in the Pim changes, then build and test Pim. The original
+`macos-ghostty.patch` is retained as a recovery/reference artifact; the
+tracked subtree is the canonical source.
+
 Pim currently starts without sandboxing because it needs to read Pi's local session directory and launch Pi processes.
 
 ## The original tmux prototype

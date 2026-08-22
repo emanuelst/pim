@@ -1803,6 +1803,13 @@ extension Ghostty {
 
             case GHOSTTY_TARGET_SURFACE:
                 guard let surface = target.target.surface else { return }
+                if !Thread.isMainThread {
+                    DispatchQueue.main.async {
+                        guard let surfaceView = self.surfaceView(from: surface) else { return }
+                        surfaceView.setCursorShape(shape)
+                    }
+                    return
+                }
                 guard let surfaceView = self.surfaceView(from: surface) else { return }
                 surfaceView.setCursorShape(shape)
 
@@ -1822,17 +1829,26 @@ extension Ghostty {
 
             case GHOSTTY_TARGET_SURFACE:
                 guard let surface = target.target.surface else { return }
-                guard let surfaceView = self.surfaceView(from: surface) else { return }
+                let visible: Bool
                 switch v {
                 case GHOSTTY_MOUSE_VISIBLE:
-                    surfaceView.setCursorVisibility(true)
+                    visible = true
 
                 case GHOSTTY_MOUSE_HIDDEN:
-                    surfaceView.setCursorVisibility(false)
+                    visible = false
 
                 default:
                     return
                 }
+                if !Thread.isMainThread {
+                    DispatchQueue.main.async {
+                        guard let surfaceView = self.surfaceView(from: surface) else { return }
+                        surfaceView.setCursorVisibility(visible)
+                    }
+                    return
+                }
+                guard let surfaceView = self.surfaceView(from: surface) else { return }
+                surfaceView.setCursorVisibility(visible)
 
             default:
                 assertionFailure()
@@ -1850,14 +1866,22 @@ extension Ghostty {
 
             case GHOSTTY_TARGET_SURFACE:
                 guard let surface = target.target.surface else { return }
-                guard let surfaceView = self.surfaceView(from: surface) else { return }
-                guard v.len > 0 else {
-                    surfaceView.hoverUrl = nil
+                let hoverURL: String?
+                if v.len > 0 {
+                    let buffer = Data(bytes: v.url!, count: v.len)
+                    hoverURL = String(data: buffer, encoding: .utf8)
+                } else {
+                    hoverURL = nil
+                }
+                if !Thread.isMainThread {
+                    DispatchQueue.main.async {
+                        guard let surfaceView = self.surfaceView(from: surface) else { return }
+                        surfaceView.hoverUrl = hoverURL
+                    }
                     return
                 }
-
-                let buffer = Data(bytes: v.url!, count: v.len)
-                surfaceView.hoverUrl = String(data: buffer, encoding: .utf8)
+                guard let surfaceView = self.surfaceView(from: surface) else { return }
+                surfaceView.hoverUrl = hoverURL
 
             default:
                 assertionFailure()

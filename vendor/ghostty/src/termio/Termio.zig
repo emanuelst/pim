@@ -61,6 +61,11 @@ size: renderer.Size,
 /// The mailbox implementation to use.
 mailbox: termio.Mailbox,
 
+/// A latest-wins resize request that is serviced ahead of ordinary input.
+/// Large tool output can otherwise leave a resize message behind a long
+/// mailbox backlog.
+pending_resize: std.atomic.Value(?*renderer.Size) = .init(null),
+
 /// The stream parser. This parses the stream of escape codes and so on
 /// from the child process and calls callbacks in the stream handler.
 terminal_stream: StreamHandler.Stream,
@@ -316,6 +321,7 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
         .size = opts.size,
         .backend = backend,
         .mailbox = opts.mailbox,
+        .pending_resize = .init(null),
         .terminal_stream = .init(.{
             .allocator = alloc,
             .handler = handler,
@@ -325,6 +331,9 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
 }
 
 pub fn deinit(self: *Termio) void {
+    if (self.pending_resize.swap(null, .acquire)) |ptr| {
+        self.alloc.destroy(ptr);
+    }
     self.backend.deinit();
     self.terminal.deinit(self.alloc);
     self.config.deinit();
@@ -335,6 +344,23 @@ pub fn deinit(self: *Termio) void {
 
     // Clear any initial state if we have it
     if (self.thread_enter_state) |v| v.destroy();
+}
+
+/// Queue a latest-wins resize ahead of ordinary terminal input.
+pub fn queueResize(self: *Termio, size: renderer.Size) void {
+    const ptr = self.alloc.create(renderer.Size) catch return;
+    ptr.* = size;
+    if (self.pending_resize.swap(ptr, .acq_rel)) |old| {
+        self.alloc.destroy(old);
+    }
+    self.mailbox.notify();
+}
+
+/// Take the latest pending resize, if one exists.
+pub fn takePendingResize(self: *Termio) ?renderer.Size {
+    const ptr = self.pending_resize.swap(null, .acquire) orelse return null;
+    defer self.alloc.destroy(ptr);
+    return ptr.*;
 }
 
 pub fn threadEnter(

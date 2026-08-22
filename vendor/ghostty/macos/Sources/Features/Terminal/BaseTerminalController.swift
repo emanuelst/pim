@@ -541,7 +541,8 @@ class BaseTerminalController: NSWindowController,
         _ newTree: SplitTree<Ghostty.SurfaceView>,
         moveFocusTo newView: Ghostty.SurfaceView? = nil,
         moveFocusFrom oldView: Ghostty.SurfaceView? = nil,
-        undoAction: String? = nil
+        undoAction: String? = nil,
+        registerUndo: Bool = true
     ) {
         // Setup our new split tree
         let oldTree = surfaceTree
@@ -553,7 +554,7 @@ class BaseTerminalController: NSWindowController,
         }
 
         // Setup our undo
-        guard let undoManager else { return }
+        guard registerUndo, let undoManager else { return }
         if let undoAction {
             undoManager.setActionName(undoAction)
         }

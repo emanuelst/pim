@@ -454,8 +454,13 @@ extension Ghostty {
                 suppressNextLeftMouseUp = false
             }
 
-            // Notify libghostty
-            ghostty_surface_set_focus(surface, focused)
+            // Notify libghostty. Pim queues this because focus changes can
+            // contend with a busy Pi surface and must not block AppKit.
+            if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
+                surfaceModel?.sendPimFocus(focused)
+            } else {
+                ghostty_surface_set_focus(surface, focused)
+            }
 
             // Update our secure input state if we are a password input
             if passwordInput {
@@ -491,12 +496,19 @@ extension Ghostty {
         }
 
         private func setSurfaceSize(width: UInt32, height: UInt32) {
+            if Bundle.main.bundleURL.lastPathComponent == "Pim.app",
+               let surfaceModel {
+                // Pi can be rendering a large tool result while AppKit is
+                // resizing the window. Keep the main thread free and retain
+                // only the newest pending framebuffer size.
+                surfaceModel.sendPimSurfaceSize(width: width, height: height) { [weak self] size in
+                    self?.surfaceSize = size
+                }
+                return
+            }
+
             guard let surface = self.surface else { return }
-
-            // Update our core surface
             ghostty_surface_set_size(surface, width, height)
-
-            // Update our cached size metrics
             let size = ghostty_surface_size(surface)
             DispatchQueue.main.async {
                 // DispatchQueue required since this may be called by SwiftUI off
@@ -901,8 +913,13 @@ extension Ghostty {
         }
 
         override func mouseDown(with event: NSEvent) {
-            guard let surface = self.surface else { return }
+            guard let surfaceModel else { return }
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
+            if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
+                surfaceModel.sendPimMouseButton(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, mods)
+                return
+            }
+            guard let surface = self.surface else { return }
             ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, mods)
         }
 
@@ -918,8 +935,17 @@ extension Ghostty {
             prevPressureStage = 0
 
             // If we have an active surface, report the event
-            guard let surface = self.surface else { return }
+            guard let surfaceModel else { return }
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
+            if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
+                surfaceModel.sendPimMouseButton(
+                    GHOSTTY_MOUSE_RELEASE,
+                    GHOSTTY_MOUSE_LEFT,
+                    mods,
+                    releasePressure: true)
+                return
+            }
+            guard let surface = self.surface else { return }
             ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, mods)
 
             // Release pressure
@@ -977,6 +1003,7 @@ extension Ghostty {
         }
 
         override func mouseEntered(with event: NSEvent) {
+            guard !mouseOverSurface else { return }
             mouseOverSurface = true
             super.mouseEntered(with: event)
 
@@ -998,6 +1025,7 @@ extension Ghostty {
         }
 
         override func mouseExited(with event: NSEvent) {
+            guard mouseOverSurface else { return }
             mouseOverSurface = false
             mouseLocationInSurface = nil
             guard let surfaceModel else { return }
