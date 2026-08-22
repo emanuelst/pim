@@ -96,10 +96,10 @@ index ace9205..2ef2591 100644
      func hide() {
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..61678e2
+index 0000000..74392d0
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1573 @@
+@@ -0,0 +1,1577 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -663,6 +663,10 @@ index 0000000..61678e2
 +
 +    static func launchCommand() -> String {
 +        piCommand()
++    }
++
++    static func launchInput(for session: PimSession) -> String {
++        "exec \(launchCommand(for: session))\r"
 +    }
 +
 +    static func shellCommand() -> String {
@@ -1697,7 +1701,7 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..620f85e 100644
+index 340a0b4..3393a31 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -6,6 +6,10 @@ import GhosttyKit
@@ -1818,7 +1822,7 @@ index 340a0b4..620f85e 100644
          terminalViewContainer?.ghosttyConfigDidChange(ghostty.config, preferredBackgroundColor: window.preferredBackgroundColor)
      }
 
-@@ -1051,6 +1096,242 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1096,254 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
 
@@ -1855,6 +1859,7 @@ index 340a0b4..620f85e 100644
 +                  self.pimPendingSession?.id == session.id else { return }
 +            let view = self.makePimSurface(session, app: ghosttyApp)
 +            self.beginPimSurface(view, for: session)
++            self.startPimProcess(view, for: session)
 +            self.finishPendingPimSurfaceIfReady()
 +        }
 +    }
@@ -1862,9 +1867,18 @@ index 340a0b4..620f85e 100644
 +    private func makePimSurface(_ session: PimSession, app: ghostty_app_t) -> Ghostty.SurfaceView {
 +        var config = Ghostty.SurfaceConfiguration()
 +        config.workingDirectory = session.cwd
-+        config.command = PimSessionStore.launchCommand(for: session)
++        // Start a shell first. Pi is started after the surface returns to the
++        // run loop so a large session cannot block AppKit during construction.
++        config.command = PimSessionStore.shellCommand()
 +        config.environmentVariables = PimSessionStore.childEnvironment()
 +        return Ghostty.SurfaceView(app, baseConfig: config)
++    }
++
++    private func startPimProcess(_ view: Ghostty.SurfaceView, for session: PimSession) {
++        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
++            guard !view.processExited else { return }
++            view.surfaceModel?.sendPimResume(PimSessionStore.launchInput(for: session))
++        }
 +    }
 +
 +    private func beginPimSurface(_ view: Ghostty.SurfaceView, for session: PimSession) {
@@ -1909,7 +1923,8 @@ index 340a0b4..620f85e 100644
 +        // The bridge publishes this only after Pi has loaded the session and
 +        // initialized its interactive mode. Do not replace the visible
 +        // terminal before that point.
-+        if pimSessionStore.activeStates[session.id] != nil {
++        if pimSessionStore.activeStates[session.id] != nil,
++           !pimSessionStore.liveElsewhere.contains(session.id) {
 +            pimPendingSession = nil
 +            pimPendingSurface = nil
 +            pimPendingStartedAt = nil
@@ -2050,10 +2065,11 @@ index 340a0b4..620f85e 100644
 +        retainCurrentPimSurfaceIfNeeded()
 +        var config = Ghostty.SurfaceConfiguration()
 +        config.workingDirectory = session.cwd
-+        config.command = PimSessionStore.launchCommand(for: session)
++        config.command = PimSessionStore.shellCommand()
 +        config.environmentVariables = PimSessionStore.childEnvironment()
 +        let view = Ghostty.SurfaceView(ghosttyApp, baseConfig: config)
 +        beginPimSurface(view, for: session)
++        startPimProcess(view, for: session)
 +        pimSessionStore.requestActiveSession(session.id)
 +        finishPendingPimSurfaceIfReady()
 +    }
@@ -2061,7 +2077,7 @@ index 340a0b4..620f85e 100644
      // MARK: - NSWindowController
 
      override func windowWillLoad() {
-@@ -1061,6 +1342,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1061,6 +1354,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      override func windowDidLoad() {
          super.windowDidLoad()
          guard let window else { return }
@@ -2069,7 +2085,7 @@ index 340a0b4..620f85e 100644
 
          // I copy this because we may change the source in the future but also because
          // I regularly audit our codebase for "ghostty.config" access because generally
-@@ -1068,6 +1350,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1068,6 +1362,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          // use whatever the latest app-level config is.
          let config = ghostty.config
 
@@ -2082,7 +2098,7 @@ index 340a0b4..620f85e 100644
          // Setting all three of these is required for restoration to work.
          window.isRestorable = restorable
          if restorable {
-@@ -1083,9 +1371,36 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1083,9 +1383,36 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              focusedSurface = view
          }
 
@@ -2120,7 +2136,7 @@ index 340a0b4..620f85e 100644
          }
 
          // Set the initial content size on the container so that
-@@ -1095,7 +1410,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1422,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
 
          window.contentView = container
