@@ -1,8 +1,16 @@
 # Pim
 
+<p align="center">
+  <img src="macos/assets/PimIcon.png" alt="Pim icon" width="160">
+</p>
+
 Pim is a native macOS session multiplexer for [Pi](https://github.com/earendil-works/pi).
 
 It gives Pi a calm, macOS-native home: a resizable sidebar for navigating chats and an embedded Ghostty terminal for the selected session.
+
+<p align="center">
+  <img src="docs/images/pim-showcase.png" alt="Pim managing Pi sessions with a local model" width="100%">
+</p>
 
 > Pim is experimental and currently intended as a local development build.
 
