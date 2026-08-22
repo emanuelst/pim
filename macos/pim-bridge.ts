@@ -6,6 +6,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 const agentDir = process.env.PIM_AGENT_DIR ?? process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".pi", "agent");
 const statusPath = path.join(agentDir, `pim-status-${process.pid}.json`);
 const role = process.env.PIM_BACKGROUND === "1" ? "background" : "foreground";
+const ownerPid = Number(process.env.PIM_OWNER_PID);
 
 function publish(session: string | undefined, state: "idle" | "working" | "stopped"): void {
 	if (state === "stopped") {
@@ -13,7 +14,14 @@ function publish(session: string | undefined, state: "idle" | "working" | "stopp
 		return;
 	}
 	fs.mkdirSync(path.dirname(statusPath), { recursive: true });
-	fs.writeFileSync(statusPath, JSON.stringify({ session, state, role, pid: process.pid, updatedAt: Date.now() }));
+	fs.writeFileSync(statusPath, JSON.stringify({
+		session,
+		state,
+		role,
+		pid: process.pid,
+		...(Number.isInteger(ownerPid) && ownerPid > 0 ? { ownerPid } : {}),
+		updatedAt: Date.now(),
+	}));
 }
 
 export default function pimBridge(pi: ExtensionAPI) {

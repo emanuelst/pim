@@ -3,7 +3,7 @@ index 127f3a0..d36268f 100644
 --- a/macos/Sources/App/AppDelegate.swift
 +++ b/macos/Sources/App/AppDelegate.swift
 @@ -1310,6 +1310,7 @@ extension AppDelegate: NSMenuItemValidation {
- 
+
  extension AppDelegate {
      func terminate() -> NSApplication.TerminateReply {
 +        let applicationName = Bundle.main.bundleURL.lastPathComponent == "Pim.app" ? "Pim" : "Ghostty"
@@ -82,9 +82,9 @@ index ace9205..2ef2591 100644
 +        }
          window.titlebarAppearsTransparent = true
      }
- 
+
 @@ -20,7 +25,9 @@ class AboutController: NSWindowController, NSWindowDelegate {
- 
+
      func show() {
          window?.makeKeyAndOrderFront(nil)
 -        viewModel.startCyclingIcons()
@@ -92,14 +92,14 @@ index ace9205..2ef2591 100644
 +            viewModel.startCyclingIcons()
 +        }
      }
- 
+
      func hide() {
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..70458de
+index 0000000..61678e2
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1541 @@
+@@ -0,0 +1,1573 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -168,6 +168,7 @@ index 0000000..70458de
 +    let states: [URL: String]
 +    let roles: [URL: String]
 +    let foregroundSession: URL?
++    let liveElsewhere: Set<URL>
 +}
 +
 +struct PimSearchResult: Identifiable, Hashable {
@@ -231,6 +232,7 @@ index 0000000..70458de
 +    @Published private(set) var sessions: [PimSession] = []
 +    @Published private(set) var activeSession: URL?
 +    @Published private(set) var activeStates: [URL: String] = [:]
++    @Published private(set) var liveElsewhere: Set<URL> = []
 +    @Published private(set) var switchingTo: URL?
 +    @Published private(set) var launchFailureSession: URL?
 +    @Published private(set) var launchFailureMessage: String?
@@ -536,6 +538,7 @@ index 0000000..70458de
 +
 +    private func applyStatus(_ status: PimStatusSnapshot) {
 +        if activeStates != status.states { activeStates = status.states }
++        if liveElsewhere != status.liveElsewhere { liveElsewhere = status.liveElsewhere }
 +    }
 +
 +    /// Starts a visual switch without changing the session whose surface is
@@ -571,6 +574,7 @@ index 0000000..70458de
 +        let root = agentDirectory
 +        var states: [URL: String] = [:]
 +        var roles: [URL: String] = [:]
++        var liveElsewhere = Set<URL>()
 +        var newestForeground: (URL, Double)?
 +        if let files = try? FileManager.default.contentsOfDirectory(
 +            at: root,
@@ -589,6 +593,10 @@ index 0000000..70458de
 +                }
 +                let session = URL(fileURLWithPath: path)
 +                states[session] = state
++                let ownerPid = (status["ownerPid"] as? NSNumber)?.intValue
++                if ownerPid.map({ $0 != ProcessInfo.processInfo.processIdentifier }) ?? true {
++                    liveElsewhere.insert(session)
++                }
 +                let role = status["role"] as? String ?? "foreground"
 +                roles[session] = role
 +                let updatedAt = (status["updatedAt"] as? NSNumber)?.doubleValue ?? 0
@@ -600,7 +608,8 @@ index 0000000..70458de
 +        return PimStatusSnapshot(
 +            states: states,
 +            roles: roles,
-+            foregroundSession: newestForeground?.0)
++            foregroundSession: newestForeground?.0,
++            liveElsewhere: liveElsewhere)
 +    }
 +
 +    nonisolated static func loadSessions() -> [PimSession] {
@@ -685,7 +694,10 @@ index 0000000..70458de
 +        for path in fallback + existing where !paths.contains(path) {
 +            paths.append(path)
 +        }
-+        return ["PATH": paths.joined(separator: ":")]
++        return [
++            "PATH": paths.joined(separator: ":"),
++            "PIM_OWNER_PID": String(ProcessInfo.processInfo.processIdentifier),
++        ]
 +    }
 +
 +    static func workspaceDirectory() -> String {
@@ -1556,7 +1568,20 @@ index 0000000..70458de
 +                Text(ageLabel(session.modified))
 +                    .font(.system(size: 11))
 +                    .foregroundStyle(.secondary)
-+                if let state = store.activeStates[session.id] {
++                if store.liveElsewhere.contains(session.id) {
++                    Image(systemName: "arrow.up.right.square")
++                        .font(.system(size: 10))
++                        .foregroundStyle(.orange)
++                        .accessibilityLabel("Live elsewhere")
++                    if store.activeStates[session.id] == "working" {
++                        ProgressView()
++                            .progressViewStyle(.circular)
++                            .controlSize(.mini)
++                            .tint(.orange)
++                            .frame(width: 8, height: 8)
++                            .accessibilityLabel("Working elsewhere")
++                    }
++                } else if let state = store.activeStates[session.id] {
 +                    Circle()
 +                        .fill(Color.green)
 +                        .frame(width: 6, height: 6)
@@ -1582,10 +1607,17 @@ index 0000000..70458de
 +                        .accessibilityLabel("Unread")
 +                }
 +            }
-+            Text(session.projectName)
-+                .font(.system(size: 11))
-+                .foregroundStyle(.secondary)
-+                .lineLimit(1)
++            HStack(spacing: 4) {
++                Text(session.projectName)
++                    .lineLimit(1)
++                if store.liveElsewhere.contains(session.id) {
++                    Text("· Live elsewhere")
++                        .foregroundStyle(.orange)
++                        .lineLimit(1)
++                }
++            }
++            .font(.system(size: 11))
++            .foregroundStyle(.secondary)
 +            if let model = session.nativeModelLabel {
 +                HStack(spacing: 6) {
 +                    Text(model)
@@ -1657,7 +1689,7 @@ index 7948810..367cbfe 100644
          let oldTree = surfaceTree
 @@ -553,7 +554,7 @@ class BaseTerminalController: NSWindowController,
          }
- 
+
          // Setup our undo
 -        guard let undoManager else { return }
 +        guard registerUndo, let undoManager else { return }
@@ -1669,7 +1701,7 @@ index 340a0b4..620f85e 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -6,6 +6,10 @@ import GhosttyKit
- 
+
  /// A classic, tabbed terminal experience.
  class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Controller {
 +    private enum PimSurfaceKind {
@@ -1678,9 +1710,9 @@ index 340a0b4..620f85e 100644
 +    }
      override var windowNibName: NSNib.Name? {
          let defaultValue = "Terminal"
- 
+
 @@ -57,6 +61,24 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
- 
+
      /// The configuration derived from the Ghostty config so we don't need to rely on references.
      private(set) var derivedConfig: DerivedConfig
 +    private let pimTerminalAppearance = PimTerminalAppearance()
@@ -1701,7 +1733,7 @@ index 340a0b4..620f85e 100644
 +    private var pimPendingStartedAt: Date?
 +    private var pimReadySessions: Set<URL> = []
 +    private var currentPimSession: URL?
- 
+
      /// The notification cancellable for focused surface property changes.
      private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
 @@ -66,17 +88,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
@@ -1718,19 +1750,19 @@ index 340a0b4..620f85e 100644
          // restoration.
 -        self.restorable = (base?.command ?? "") == ""
 +        self.restorable = (pimBase.command ?? "") == ""
- 
+
          // Setup our initial derived config based on the current app config
          self.derivedConfig = DerivedConfig(ghostty.config)
 +        self.currentPimSession = initialPimSession
- 
+
 -        super.init(ghostty, baseConfig: base, surfaceTree: tree)
 +        super.init(ghostty, baseConfig: pimBase, surfaceTree: tree)
- 
+
          // Setup our notifications for behaviors
          let center = NotificationCenter.default
 @@ -140,6 +166,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      }
- 
+
      deinit {
 +        pimProcessMonitor?.invalidate()
          // Remove all of our notificationcenter subscriptions
@@ -1754,21 +1786,21 @@ index 340a0b4..620f85e 100644
 +            undoAction: undoAction,
 +            registerUndo: registerUndo)
      }
- 
+
      // MARK: Terminal Creation
 @@ -621,6 +650,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
- 
+
          // Sync our zoom state for splits
          window.surfaceIsZoomed = surfaceTree.zoomed != nil
 +        pimTerminalAppearance.update(
 +            backgroundColor: surfaceConfig.backgroundColor,
 +            backgroundOpacity: surfaceConfig.backgroundOpacity,
 +            backgroundBlur: surfaceConfig.backgroundBlur)
- 
+
          // Set the font for the window and tab titles.
          if let titleFontName = surfaceConfig.windowTitleFontFamily {
 @@ -631,6 +664,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
- 
+
          // Call this last in case it uses any of the properties above.
          window.syncAppearance(surfaceConfig)
 +        if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
@@ -1785,11 +1817,11 @@ index 340a0b4..620f85e 100644
 +        }
          terminalViewContainer?.ghosttyConfigDidChange(ghostty.config, preferredBackgroundColor: window.preferredBackgroundColor)
      }
- 
+
 @@ -1051,6 +1096,242 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
- 
+
 +    private func openPimSession(_ session: PimSession) {
 +        if currentPimSession == session.id,
 +           pimSurfaceKinds[session.id] == .pi,
@@ -2027,20 +2059,20 @@ index 340a0b4..620f85e 100644
 +    }
 +
      // MARK: - NSWindowController
- 
+
      override func windowWillLoad() {
 @@ -1061,6 +1342,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      override func windowDidLoad() {
          super.windowDidLoad()
          guard let window else { return }
 +        PimBranding.installMenuTitles()
- 
+
          // I copy this because we may change the source in the future but also because
          // I regularly audit our codebase for "ghostty.config" access because generally
 @@ -1068,6 +1350,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          // use whatever the latest app-level config is.
          let config = ghostty.config
- 
+
 +        if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
 +            // Pim follows the user's macOS appearance instead of locking the
 +            // application to the terminal's configured window theme.
@@ -2053,7 +2085,7 @@ index 340a0b4..620f85e 100644
 @@ -1083,9 +1371,36 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              focusedSurface = view
          }
- 
+
 +        // The child-exit message is the normal path. This monitor is a small
 +        // fallback for exits that Ghostty reports without publishing that
 +        // message (notably quick Ctrl-C exits).
@@ -2086,11 +2118,11 @@ index 340a0b4..620f85e 100644
 +                },
 +                onNew: { [weak self] in self?.newPimChat() })
          }
- 
+
          // Set the initial content size on the container so that
 @@ -1095,7 +1410,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
- 
+
          window.contentView = container
 -
 +        if pimSidebarAccessory == nil {
@@ -2121,7 +2153,7 @@ index b6e1c63..cd56c2d 100644
 +                       Bundle.main.bundleURL.lastPathComponent != "Pim.app" {
                          DebugBuildWarningView()
                      }
- 
+
 diff --git a/macos/Sources/Features/Terminal/TerminalViewContainer.swift b/macos/Sources/Features/Terminal/TerminalViewContainer.swift
 index cd0b45b..52ed76e 100644
 --- a/macos/Sources/Features/Terminal/TerminalViewContainer.swift
@@ -2129,7 +2161,7 @@ index cd0b45b..52ed76e 100644
 @@ -6,6 +6,15 @@ import SwiftUI
  class TerminalViewContainer: NSView {
      private let terminalView: NSView
- 
+
 +    override var safeAreaInsets: NSEdgeInsets {
 +        // Pim draws its compact content toolbar under the transparent native
 +        // titlebar. Do not inject a second SwiftUI top inset there.
@@ -2144,17 +2176,17 @@ index cd0b45b..52ed76e 100644
      private var derivedConfig: DerivedConfig?
 diff --git a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
 index d907db9..dfc90ad 100644
---- a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift	
-+++ b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift	
+--- a/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
++++ b/macos/Sources/Features/Terminal/Window Styles/HiddenTitlebarTerminalWindow.swift
 @@ -51,14 +51,16 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
              styleMask = Self.hiddenStyleMask
          }
- 
+
 -        // Hide the title
 +        let isPim = Bundle.main.bundleURL.lastPathComponent == "Pim.app"
          titleVisibility = .hidden
          titlebarAppearsTransparent = true
- 
+
 -        // Hide the traffic lights (window control buttons)
 -        standardWindowButton(.closeButton)?.isHidden = true
 -        standardWindowButton(.miniaturizeButton)?.isHidden = true
@@ -2165,7 +2197,7 @@ index d907db9..dfc90ad 100644
 +            standardWindowButton(.miniaturizeButton)?.isHidden = true
 +            standardWindowButton(.zoomButton)?.isHidden = true
 +        }
- 
+
          // Disallow tabbing if the titlebar is hidden, since that will (should) also hide the tab bar.
          tabbingMode = .disallowed
 @@ -66,7 +68,8 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
@@ -2179,7 +2211,7 @@ index d907db9..dfc90ad 100644
              titleBarContainer.isHidden = true
          }
 @@ -88,9 +91,8 @@ class HiddenTitlebarTerminalWindow: TerminalWindow {
- 
+
      override var title: String {
          didSet {
 -            // Updating the title text as above automatically reveals the
@@ -2210,7 +2242,7 @@ index bfe42b1..1c8aca7 100644
 +++ b/macos/Sources/Ghostty/Ghostty.Config.swift
 @@ -349,6 +349,9 @@ extension Ghostty {
          }
- 
+
          var macosTitlebarStyle: MacOSTitlebarStyle {
 +            if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
 +                return .hidden
@@ -2225,7 +2257,7 @@ index a076063..1685131 100644
 @@ -1,5 +1,65 @@
 +import Foundation
  import GhosttyKit
- 
+
 +private final class PimSurfaceResizeScheduler: @unchecked Sendable {
 +    private struct Request {
 +        let surface: ghostty_surface_t
@@ -2293,13 +2325,13 @@ index a076063..1685131 100644
          /// may be unsafe but the value itself is safe to send across threads.
          nonisolated(unsafe) private let surface: ghostty_surface_t
 +        private let pimResizeScheduler = PimSurfaceResizeScheduler()
- 
+
          /// Read the underlying C value for this surface. This is unsafe because the value will be
          /// freed when the Surface class is deinitialized.
 @@ -44,6 +105,52 @@ extension Ghostty {
              }
          }
- 
+
 +        /// Submit a Pim surface resize without blocking AppKit on libghostty.
 +        /// Only the newest pending size is retained while a resize is in flight.
 +        nonisolated func sendPimSurfaceSize(
@@ -2382,12 +2414,12 @@ index a076063..1685131 100644
                  event.x,
 diff --git a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift b/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
 index 0dbdeef..289acb7 100644
---- a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift	
-+++ b/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift	
+--- a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
++++ b/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
 @@ -454,8 +454,13 @@ extension Ghostty {
                  suppressNextLeftMouseUp = false
              }
- 
+
 -            // Notify libghostty
 -            ghostty_surface_set_focus(surface, focused)
 +            // Notify libghostty. Pim queues this because focus changes can
@@ -2397,12 +2429,12 @@ index 0dbdeef..289acb7 100644
 +            } else {
 +                ghostty_surface_set_focus(surface, focused)
 +            }
- 
+
              // Update our secure input state if we are a password input
              if passwordInput {
 @@ -491,12 +496,19 @@ extension Ghostty {
          }
- 
+
          private func setSurfaceSize(width: UInt32, height: UInt32) {
 -            guard let surface = self.surface else { return }
 +            if Bundle.main.bundleURL.lastPathComponent == "Pim.app",
@@ -2415,7 +2447,7 @@ index 0dbdeef..289acb7 100644
 +                }
 +                return
 +            }
- 
+
 -            // Update our core surface
 +            guard let surface = self.surface else { return }
              ghostty_surface_set_size(surface, width, height)
@@ -2426,7 +2458,7 @@ index 0dbdeef..289acb7 100644
                  // DispatchQueue required since this may be called by SwiftUI off
 @@ -901,8 +913,13 @@ extension Ghostty {
          }
- 
+
          override func mouseDown(with event: NSEvent) {
 -            guard let surface = self.surface else { return }
 +            guard let surfaceModel else { return }
@@ -2438,10 +2470,10 @@ index 0dbdeef..289acb7 100644
 +            guard let surface = self.surface else { return }
              ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, mods)
          }
- 
+
 @@ -918,8 +935,17 @@ extension Ghostty {
              prevPressureStage = 0
- 
+
              // If we have an active surface, report the event
 -            guard let surface = self.surface else { return }
 +            guard let surfaceModel else { return }
@@ -2456,19 +2488,19 @@ index 0dbdeef..289acb7 100644
 +            }
 +            guard let surface = self.surface else { return }
              ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, mods)
- 
+
              // Release pressure
 @@ -977,6 +1003,7 @@ extension Ghostty {
          }
- 
+
          override func mouseEntered(with event: NSEvent) {
 +            guard !mouseOverSurface else { return }
              mouseOverSurface = true
              super.mouseEntered(with: event)
- 
+
 @@ -998,6 +1025,7 @@ extension Ghostty {
          }
- 
+
          override func mouseExited(with event: NSEvent) {
 +            guard mouseOverSurface else { return }
              mouseOverSurface = false
@@ -2481,14 +2513,14 @@ index c57eeab..5382848 100644
 @@ -2527,8 +2527,9 @@ fn resize(self: *Surface, size: rendererpkg.ScreenSize) !void {
              "set. Is your padding reasonable?", .{});
      }
- 
+
 -    // Mail the IO thread
 -    self.queueIo(.{ .resize = self.size }, .unlocked);
 +    // Resize is latest-wins and must bypass ordinary input backlog. A large
 +    // tool result can otherwise delay the visible terminal reflow by seconds.
 +    self.io.queueResize(self.size);
  }
- 
+
  /// Recalculate the balanced padding if needed.
 diff --git a/src/termio/Termio.zig b/src/termio/Termio.zig
 index 0f8a7cc..a39c745 100644
@@ -2497,7 +2529,7 @@ index 0f8a7cc..a39c745 100644
 @@ -61,6 +61,11 @@ size: renderer.Size,
  /// The mailbox implementation to use.
  mailbox: termio.Mailbox,
- 
+
 +/// A latest-wins resize request that is serviced ahead of ordinary input.
 +/// Large tool output can otherwise leave a resize message behind a long
 +/// mailbox backlog.
@@ -2516,7 +2548,7 @@ index 0f8a7cc..a39c745 100644
              .handler = handler,
 @@ -325,6 +331,9 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
  }
- 
+
  pub fn deinit(self: *Termio) void {
 +    if (self.pending_resize.swap(null, .acquire)) |ptr| {
 +        self.alloc.destroy(ptr);
@@ -2527,7 +2559,7 @@ index 0f8a7cc..a39c745 100644
 @@ -337,6 +346,23 @@ pub fn deinit(self: *Termio) void {
      if (self.thread_enter_state) |v| v.destroy();
  }
- 
+
 +/// Queue a latest-wins resize ahead of ordinary terminal input.
 +pub fn queueResize(self: *Termio, size: renderer.Size) void {
 +    const ptr = self.alloc.create(renderer.Size) catch return;
