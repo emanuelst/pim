@@ -96,10 +96,10 @@ index ace9205..2ef2591 100644
      func hide() {
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..31fd5e3
+index 0000000..f7c7cf5
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1650 @@
+@@ -0,0 +1,1658 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -230,6 +230,7 @@ index 0000000..31fd5e3
 +@MainActor
 +final class PimSessionStore: ObservableObject {
 +    @Published private(set) var sessions: [PimSession] = []
++    @Published private(set) var isLoading = false
 +    @Published private(set) var activeSession: URL?
 +    @Published private(set) var activeStates: [URL: String] = [:]
 +    @Published private(set) var liveElsewhere: Set<URL> = []
@@ -504,6 +505,7 @@ index 0000000..31fd5e3
 +    func refresh() {
 +        guard !refreshInFlight else { return }
 +        refreshInFlight = true
++        isLoading = true
 +        let oldCache = cache
 +        DispatchQueue.global(qos: .utility).async { [weak self] in
 +            let (sessions, cache) = Self.loadSessions(cached: oldCache)
@@ -523,6 +525,7 @@ index 0000000..31fd5e3
 +                    self.needsInitialReadMigration = false
 +                }
 +                self.refreshInFlight = false
++                self.isLoading = false
 +            }
 +        }
 +    }
@@ -1550,6 +1553,11 @@ index 0000000..31fd5e3
 +            HStack {
 +                Text("Chats")
 +                    .font(.headline)
++                if store.isLoading {
++                    ProgressView()
++                        .controlSize(.small)
++                        .accessibilityLabel("Loading chats")
++                }
 +                Spacer()
 +                Button {
 +                    searchState.isPresented = true
