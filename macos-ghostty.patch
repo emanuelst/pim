@@ -96,10 +96,10 @@ index ace9205..2ef2591 100644
      func hide() {
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..74392d0
+index 0000000..764f772
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1577 @@
+@@ -0,0 +1,1600 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -264,9 +264,11 @@ index 0000000..74392d0
 +            .appendingPathComponent(".pi/agent", isDirectory: true)
 +    }
 +    private var searchGeneration = 0
++    private static var piIntegrationInstalled = false
 +
 +    init() {
 +        PimIcon.install()
++        Self.installPiIntegration()
 +        readAt = UserDefaults.standard.dictionary(forKey: Self.readStateKey) as? [String: TimeInterval] ?? [:]
 +        pinnedPaths = Set(UserDefaults.standard.stringArray(forKey: Self.pinnedKey) ?? [])
 +        customNames = UserDefaults.standard.dictionary(forKey: Self.customNamesKey) as? [String: String] ?? [:]
@@ -719,8 +721,29 @@ index 0000000..74392d0
 +
 +    private static func piCommand() -> String {
 +        let extensionPath = Bundle.main.url(forResource: "pim-bridge", withExtension: "ts")?.path
-+        let extensionArgument = extensionPath.map { " -e \(quote($0))" } ?? ""
++        let extensionArgument = piIntegrationInstalled ? "" : extensionPath.map { " -e \(quote($0))" } ?? ""
 +        return "\(quote(piExecutable))\(extensionArgument)"
++    }
++
++    private static func installPiIntegration() {
++        guard Bundle.main.bundleURL.lastPathComponent == "Pim.app",
++              let source = Bundle.main.url(forResource: "pim-bridge", withExtension: "ts"),
++              let data = try? Data(contentsOf: source) else { return }
++        let target = agentDirectory
++            .appendingPathComponent("extensions", isDirectory: true)
++            .appendingPathComponent("pim-integration.ts")
++        do {
++            try FileManager.default.createDirectory(
++                at: target.deletingLastPathComponent(),
++                withIntermediateDirectories: true)
++            let existing = try? Data(contentsOf: target)
++            if existing != Optional(data) {
++                try data.write(to: target, options: .atomic)
++            }
++            piIntegrationInstalled = true
++        } catch {
++            piIntegrationInstalled = false
++        }
 +    }
 +
 +    private static var piExecutable: String {
