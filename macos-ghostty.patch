@@ -96,10 +96,10 @@ index ace9205..2ef2591 100644
      func hide() {
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..627319d
+index 0000000..22c2a0f
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1614 @@
+@@ -0,0 +1,1645 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -600,9 +600,21 @@ index 0000000..627319d
 +                    try? FileManager.default.removeItem(at: url)
 +                    continue
 +                }
-+                if let pid = (status["pid"] as? NSNumber)?.int32Value,
-+                   pid > 0,
-+                   kill(pid, 0) != 0 {
++                guard let pid = (status["pid"] as? NSNumber)?.int32Value,
++                      pid > 0 else { continue }
++                if kill(pid, 0) != 0 {
++                    try? FileManager.default.removeItem(at: url)
++                    continue
++                }
++                if let processStart = processStartTimeMilliseconds(pid) {
++                    if processStart > updatedAt + 1_000 {
++                        // The PID was reused after this status was written.
++                        try? FileManager.default.removeItem(at: url)
++                        continue
++                    }
++                } else if processExecutableName(pid) != "node" {
++                    // Root-owned processes can hide their start time. Reject
++                    // them unless the executable still looks like Pi's Node process.
 +                    try? FileManager.default.removeItem(at: url)
 +                    continue
 +                }
@@ -626,6 +638,25 @@ index 0000000..627319d
 +            roles: roles,
 +            foregroundSession: newestForeground?.0,
 +            liveElsewhere: liveElsewhere)
++    }
++
++    private nonisolated static func processExecutableName(_ pid: Int32) -> String? {
++        var buffer = [CChar](repeating: 0, count: 4096)
++        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
++        return URL(fileURLWithPath: String(cString: buffer)).lastPathComponent
++    }
++
++    private nonisolated static func processStartTimeMilliseconds(_ pid: Int32) -> Double? {
++        var info = proc_bsdinfo()
++        guard proc_pidinfo(
++            pid,
++            PROC_PIDTBSDINFO,
++            0,
++            &info,
++            Int32(MemoryLayout<proc_bsdinfo>.stride)) == Int32(MemoryLayout<proc_bsdinfo>.stride) else {
++            return nil
++        }
++        return Double(info.pbi_start_tvsec) * 1000 + Double(info.pbi_start_tvusec) / 1000
 +    }
 +
 +    nonisolated static func loadSessions() -> [PimSession] {
