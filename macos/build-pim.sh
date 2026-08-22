@@ -20,12 +20,12 @@ if git apply --check "$PATCH" 2>/dev/null; then
   git apply "$PATCH"
 fi
 
-zig build -Doptimize=Debug -Demit-macos-app=false
+zig build -Doptimize=ReleaseFast -Demit-macos-app=false
 cd macos
-xcodebuild -project Ghostty.xcodeproj -scheme Ghostty -configuration Debug SYMROOT="$PWD/build" build >/dev/null
+xcodebuild -project Ghostty.xcodeproj -scheme Ghostty -configuration ReleaseLocal SYMROOT="$PWD/build" build >/dev/null
 
 rm -rf "$ROOT/build"
-ditto "$PWD/build/Debug/Ghostty.app" "$ROOT/build/Pim.app"
+ditto "$PWD/build/ReleaseLocal/Ghostty.app" "$ROOT/build/Pim.app"
 cp "$ROOT/macos/pim-bridge.ts" "$ROOT/build/Pim.app/Contents/Resources/pim-bridge.ts"
 
 # Preserve the third-party license required by Ghostty's MIT license.
