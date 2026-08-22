@@ -96,10 +96,10 @@ index ace9205..2ef2591 100644
      func hide() {
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..4ce3362
+index 0000000..a626400
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1610 @@
+@@ -0,0 +1,1614 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -592,7 +592,11 @@ index 0000000..4ce3362
 +                      let state = status["state"] as? String else { continue }
 +                let version = (status["version"] as? NSNumber)?.intValue ?? 0
 +                let updatedAt = (status["updatedAt"] as? NSNumber)?.doubleValue ?? 0
-+                if version != 2 || updatedAt < Date().timeIntervalSince1970 * 1000 - statusFreshnessMilliseconds {
++                // Version 2 processes have a heartbeat, so stale files can be
++                // discarded. Older Pi processes do not heartbeat, but their
++                // status is still useful when the recorded process is alive.
++                if version == 2,
++                   updatedAt < Date().timeIntervalSince1970 * 1000 - statusFreshnessMilliseconds {
 +                    try? FileManager.default.removeItem(at: url)
 +                    continue
 +                }
