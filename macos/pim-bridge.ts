@@ -7,14 +7,19 @@ const agentDir = process.env.PIM_AGENT_DIR ?? process.env.PI_CODING_AGENT_DIR ??
 const statusPath = path.join(agentDir, `pim-status-${process.pid}.json`);
 const role = process.env.PIM_BACKGROUND === "1" ? "background" : "foreground";
 const ownerPid = Number(process.env.PIM_OWNER_PID);
+type ActivityState = "idle" | "working";
+let currentSession: string | undefined;
+let currentState: ActivityState = "idle";
 
-function publish(session: string | undefined, state: "idle" | "working" | "stopped"): void {
+function publish(session: string | undefined, state: ActivityState | "stopped"): void {
 	if (state === "stopped") {
 		try { fs.unlinkSync(statusPath); } catch {}
 		return;
 	}
 	fs.mkdirSync(path.dirname(statusPath), { recursive: true });
-	fs.writeFileSync(statusPath, JSON.stringify({
+	const temporaryPath = `${statusPath}.${process.pid}.tmp`;
+	fs.writeFileSync(temporaryPath, JSON.stringify({
+		version: 2,
 		session,
 		state,
 		role,
@@ -22,7 +27,13 @@ function publish(session: string | undefined, state: "idle" | "working" | "stopp
 		...(Number.isInteger(ownerPid) && ownerPid > 0 ? { ownerPid } : {}),
 		updatedAt: Date.now(),
 	}));
+	fs.renameSync(temporaryPath, statusPath);
 }
+
+const heartbeat = setInterval(() => {
+	if (currentSession) publish(currentSession, currentState);
+}, 2_000);
+(heartbeat as NodeJS.Timeout).unref?.();
 
 export default function pimBridge(pi: ExtensionAPI) {
 	pi.registerCommand("pim-resume", {
@@ -35,9 +46,22 @@ export default function pimBridge(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
-		publish(ctx.sessionManager.getSessionFile(), "idle");
+		currentSession = ctx.sessionManager.getSessionFile();
+		currentState = "idle";
+		publish(currentSession, currentState);
 	});
-	pi.on("session_shutdown", () => publish(undefined, "stopped"));
-	pi.on("agent_start", (_event, ctx) => publish(ctx.sessionManager.getSessionFile(), "working"));
-	pi.on("agent_settled", (_event, ctx) => publish(ctx.sessionManager.getSessionFile(), "idle"));
+	pi.on("session_shutdown", () => {
+		currentSession = undefined;
+		publish(undefined, "stopped");
+	});
+	pi.on("agent_start", (_event, ctx) => {
+		currentSession = ctx.sessionManager.getSessionFile();
+		currentState = "working";
+		publish(currentSession, currentState);
+	});
+	pi.on("agent_settled", (_event, ctx) => {
+		currentSession = ctx.sessionManager.getSessionFile();
+		currentState = "idle";
+		publish(currentSession, currentState);
+	});
 }
