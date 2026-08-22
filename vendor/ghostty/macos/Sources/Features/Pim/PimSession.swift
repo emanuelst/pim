@@ -68,6 +68,7 @@ private struct PimStatusSnapshot: Sendable {
     let foregroundSession: URL?
     let liveElsewhere: Set<URL>
     let ownedSessions: Set<URL>
+    let processIDs: [URL: Set<Int32>]
 }
 
 struct PimSearchResult: Identifiable, Hashable {
@@ -152,6 +153,7 @@ final class PimSessionStore: ObservableObject {
     private var cache: [URL: (Date, PimSession)] = [:]
     private var refreshInFlight = false
     private var statusRefreshInFlight = false
+    private var statusProcessIDs: [URL: Set<Int32>] = [:]
     private var requestedActiveSession: URL?
     private var activeSessionBeforeRequest: URL?
 
@@ -447,6 +449,7 @@ final class PimSessionStore: ObservableObject {
         if activeStates != status.states { activeStates = status.states }
         if liveElsewhere != status.liveElsewhere { liveElsewhere = status.liveElsewhere }
         if ownedSessions != status.ownedSessions { ownedSessions = status.ownedSessions }
+        if statusProcessIDs != status.processIDs { statusProcessIDs = status.processIDs }
     }
 
     /// Starts a visual switch without changing the session whose surface is
@@ -487,12 +490,22 @@ final class PimSessionStore: ObservableObject {
         launchFailureMessage = nil
     }
 
+    /// Status files from older Pi/Pim processes do not contain ownerPid. Match
+    /// the status PID to the surface's foreground process as the authoritative
+    /// local ownership check for launches.
+    func isReady(_ session: URL, foregroundPID: Int?) -> Bool {
+        if ownedSessions.contains(session) { return true }
+        guard let foregroundPID else { return false }
+        return statusProcessIDs[session]?.contains(Int32(foregroundPID)) == true
+    }
+
     private nonisolated static func loadStatus() -> PimStatusSnapshot {
         let root = agentDirectory
         var states: [URL: String] = [:]
         var roles: [URL: String] = [:]
         var liveElsewhere = Set<URL>()
         var ownedSessions = Set<URL>()
+        var processIDs: [URL: Set<Int32>] = [:]
         var newestForeground: (URL, Double)?
         if let files = try? FileManager.default.contentsOfDirectory(
             at: root,
@@ -533,6 +546,7 @@ final class PimSessionStore: ObservableObject {
                     continue
                 }
                 let session = URL(fileURLWithPath: path)
+                processIDs[session, default: []].insert(pid)
                 if state == "working" || states[session] == nil {
                     states[session] = state
                 }
@@ -554,7 +568,8 @@ final class PimSessionStore: ObservableObject {
             roles: roles,
             foregroundSession: newestForeground?.0,
             liveElsewhere: liveElsewhere,
-            ownedSessions: ownedSessions)
+            ownedSessions: ownedSessions,
+            processIDs: processIDs)
     }
 
     private nonisolated static func processExecutableName(_ pid: Int32) -> String? {

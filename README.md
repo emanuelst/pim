@@ -72,8 +72,8 @@ git subtree pull --prefix=vendor/ghostty \
 ```
 
 Resolve any conflicts in the Pim changes, then build and test Pim. The original
-`macos-ghostty.patch` is retained as a recovery/reference artifact; the
-tracked subtree is the canonical source.
+`macos-ghostty.patch` is retained as a historical reference; the tracked
+subtree is the canonical source.
 
 Pim currently starts without sandboxing because it needs to read Pi's local session directory and launch Pi processes.
 

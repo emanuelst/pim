@@ -1222,7 +1222,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // The bridge publishes this only after Pi has loaded the session and
         // initialized its interactive mode. Do not replace the visible
         // terminal before that point.
-        if pimSessionStore.ownedSessions.contains(session.id) {
+        if pimSessionStore.isReady(
+            session.id,
+            foregroundPID: view.surfaceModel?.foregroundPID) {
             pimPendingSession = nil
             pimPendingSurface = nil
             pimPendingStartedAt = nil
@@ -1234,11 +1236,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // A missing bridge/status file is a launch failure, not a reason to
         // expose a shell. This also prevents an infinite loading state.
         if let started = pimPendingStartedAt,
-           Date().timeIntervalSince(started) > 10 {
+           Date().timeIntervalSince(started) > 60 {
             failPendingPimLaunch(
                 session,
                 view: view,
-                message: "Pi did not become ready within 10 seconds.")
+                message: "Pi did not become ready within 60 seconds.")
         }
     }
 
