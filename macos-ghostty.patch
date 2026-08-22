@@ -96,7 +96,7 @@ index ace9205..2ef2591 100644
      func hide() {
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..a626400
+index 0000000..627319d
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
 @@ -0,0 +1,1614 @@
@@ -1182,7 +1182,7 @@ index 0000000..a626400
 +        .frame(maxWidth: .infinity, maxHeight: .infinity)
 +        // Fully cover the inert bootstrap terminal. Its login banner must
 +        // never leak through the choose-a-chat state.
-+        .background(appearance.backgroundColor.opacity(appearance.backgroundOpacity))
++        .background(appearance.backgroundColor)
 +        .contentShape(Rectangle())
 +    }
 +}
@@ -1214,7 +1214,7 @@ index 0000000..a626400
 +            .frame(maxWidth: .infinity, maxHeight: .infinity)
 +            .padding(28)
 +            .foregroundStyle(appearance.usesLightForeground ? Color.black : Color.white)
-+            .background(appearance.backgroundColor.opacity(appearance.backgroundOpacity))
++            .background(appearance.backgroundColor)
 +            .transition(.opacity)
 +        } else if let loadingID = store.switchingTo {
 +            let loadingName = store.sessions
@@ -1234,7 +1234,7 @@ index 0000000..a626400
 +            .frame(maxWidth: .infinity, maxHeight: .infinity)
 +            .foregroundStyle(appearance.usesLightForeground ? Color.black : Color.white)
 +            // Loading is part of the terminal surface, not a floating panel.
-+            .background(appearance.backgroundColor.opacity(appearance.backgroundOpacity))
++            .background(appearance.backgroundColor)
 +            .transition(.opacity)
 +            .animation(.easeOut(duration: 0.15), value: store.switchingTo)
 +        }
@@ -1738,7 +1738,7 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..3393a31 100644
+index 340a0b4..f684e7d 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -6,6 +6,10 @@ import GhosttyKit
@@ -1752,7 +1752,7 @@ index 340a0b4..3393a31 100644
      override var windowNibName: NSNib.Name? {
          let defaultValue = "Terminal"
  
-@@ -57,6 +61,24 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -57,6 +61,25 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
  
      /// The configuration derived from the Ghostty config so we don't need to rely on references.
      private(set) var derivedConfig: DerivedConfig
@@ -1772,12 +1772,13 @@ index 340a0b4..3393a31 100644
 +    private var pimPendingSession: PimSession?
 +    private var pimPendingSurface: Ghostty.SurfaceView?
 +    private var pimPendingStartedAt: Date?
++    private var pimLaunchGeneration = 0
 +    private var pimReadySessions: Set<URL> = []
 +    private var currentPimSession: URL?
  
      /// The notification cancellable for focused surface property changes.
      private var surfaceAppearanceCancellables: Set<AnyCancellable> = []
-@@ -66,17 +88,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -66,17 +89,21 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
           withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
           parent: NSWindow? = nil
      ) {
@@ -1801,7 +1802,7 @@ index 340a0b4..3393a31 100644
  
          // Setup our notifications for behaviors
          let center = NotificationCenter.default
-@@ -140,6 +166,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -140,6 +167,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      }
  
      deinit {
@@ -1809,7 +1810,7 @@ index 340a0b4..3393a31 100644
          // Remove all of our notificationcenter subscriptions
          let center = NotificationCenter.default
          center.removeObserver(self)
-@@ -190,7 +217,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -190,7 +218,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          _ newTree: SplitTree<Ghostty.SurfaceView>,
          moveFocusTo newView: Ghostty.SurfaceView? = nil,
          moveFocusFrom oldView: Ghostty.SurfaceView? = nil,
@@ -1819,7 +1820,7 @@ index 340a0b4..3393a31 100644
      ) {
          // We have a special case if our tree is empty to close our tab immediately.
          // This makes it so that undo is handled properly.
-@@ -203,7 +231,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -203,7 +232,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              newTree,
              moveFocusTo: newView,
              moveFocusFrom: oldView,
@@ -1829,7 +1830,7 @@ index 340a0b4..3393a31 100644
      }
  
      // MARK: Terminal Creation
-@@ -621,6 +650,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -621,6 +651,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
  
          // Sync our zoom state for splits
          window.surfaceIsZoomed = surfaceTree.zoomed != nil
@@ -1840,7 +1841,7 @@ index 340a0b4..3393a31 100644
  
          // Set the font for the window and tab titles.
          if let titleFontName = surfaceConfig.windowTitleFontFamily {
-@@ -631,6 +664,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -631,6 +665,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
  
          // Call this last in case it uses any of the properties above.
          window.syncAppearance(surfaceConfig)
@@ -1859,7 +1860,7 @@ index 340a0b4..3393a31 100644
          terminalViewContainer?.ghosttyConfigDidChange(ghostty.config, preferredBackgroundColor: window.preferredBackgroundColor)
      }
  
-@@ -1051,6 +1096,254 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1097,274 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
  
@@ -1872,6 +1873,7 @@ index 340a0b4..3393a31 100644
 +        }
 +
 +        cancelPendingPimLaunch()
++        let launchGeneration = pimLaunchGeneration
 +        pimPendingSession = session
 +        retainCurrentPimSurfaceIfNeeded()
 +
@@ -1893,10 +1895,11 @@ index 340a0b4..3393a31 100644
 +        // in the tree until the new Pi process publishes its ready status.
 +        DispatchQueue.main.async { [weak self] in
 +            guard let self,
++                  self.pimLaunchGeneration == launchGeneration,
 +                  self.pimPendingSession?.id == session.id else { return }
 +            let view = self.makePimSurface(session, app: ghosttyApp)
 +            self.beginPimSurface(view, for: session)
-+            self.startPimProcess(view, for: session)
++            self.startPimProcess(view, for: session, generation: launchGeneration)
 +            self.finishPendingPimSurfaceIfReady()
 +        }
 +    }
@@ -1911,9 +1914,17 @@ index 340a0b4..3393a31 100644
 +        return Ghostty.SurfaceView(app, baseConfig: config)
 +    }
 +
-+    private func startPimProcess(_ view: Ghostty.SurfaceView, for session: PimSession) {
-+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-+            guard !view.processExited else { return }
++    private func startPimProcess(
++        _ view: Ghostty.SurfaceView,
++        for session: PimSession,
++        generation: Int
++    ) {
++        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak view] in
++            guard let self, let view,
++                  self.pimLaunchGeneration == generation,
++                  self.pimPendingSurface === view,
++                  self.pimPendingSession?.id == session.id,
++                  !view.processExited else { return }
 +            view.surfaceModel?.sendPimResume(PimSessionStore.launchInput(for: session))
 +        }
 +    }
@@ -1989,6 +2000,7 @@ index 340a0b4..3393a31 100644
 +        guard pimPendingSession?.id == session.id,
 +              pimPendingSurface === view,
 +              pimSurfaces[session.id] === view else { return }
++        stopPimSurface(view)
 +        pimSurfaceExitCancellables.removeValue(forKey: session.id)
 +        pimSurfaces.removeValue(forKey: session.id)
 +        pimSurfaceKinds.removeValue(forKey: session.id)
@@ -2000,9 +2012,11 @@ index 340a0b4..3393a31 100644
 +    }
 +
 +    private func cancelPendingPimLaunch() {
++        pimLaunchGeneration += 1
 +        guard let session = pimPendingSession else { return }
 +        if let view = pimPendingSurface,
 +           pimSurfaces[session.id] === view {
++            stopPimSurface(view)
 +            pimSurfaceExitCancellables.removeValue(forKey: session.id)
 +            pimSurfaces.removeValue(forKey: session.id)
 +            pimSurfaceKinds.removeValue(forKey: session.id)
@@ -2011,6 +2025,12 @@ index 340a0b4..3393a31 100644
 +        pimPendingSession = nil
 +        pimPendingSurface = nil
 +        pimPendingStartedAt = nil
++    }
++
++    private func stopPimSurface(_ view: Ghostty.SurfaceView) {
++        guard !view.processExited,
++              let surface = view.surface else { return }
++        ghostty.requestClose(surface: surface)
 +    }
 +
 +    private func makePimShellSurface(_ session: PimSession, app: ghostty_app_t) -> Ghostty.SurfaceView {
@@ -2099,6 +2119,7 @@ index 340a0b4..3393a31 100644
 +                cwd: PimSessionStore.workspaceDirectory()) else { return }
 +        pimSessionStore.markRead(session)
 +        cancelPendingPimLaunch()
++        let launchGeneration = pimLaunchGeneration
 +        retainCurrentPimSurfaceIfNeeded()
 +        var config = Ghostty.SurfaceConfiguration()
 +        config.workingDirectory = session.cwd
@@ -2106,7 +2127,7 @@ index 340a0b4..3393a31 100644
 +        config.environmentVariables = PimSessionStore.childEnvironment()
 +        let view = Ghostty.SurfaceView(ghosttyApp, baseConfig: config)
 +        beginPimSurface(view, for: session)
-+        startPimProcess(view, for: session)
++        startPimProcess(view, for: session, generation: launchGeneration)
 +        pimSessionStore.requestActiveSession(session.id)
 +        finishPendingPimSurfaceIfReady()
 +    }
@@ -2114,7 +2135,7 @@ index 340a0b4..3393a31 100644
      // MARK: - NSWindowController
  
      override func windowWillLoad() {
-@@ -1061,6 +1354,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1061,6 +1375,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      override func windowDidLoad() {
          super.windowDidLoad()
          guard let window else { return }
@@ -2122,7 +2143,7 @@ index 340a0b4..3393a31 100644
  
          // I copy this because we may change the source in the future but also because
          // I regularly audit our codebase for "ghostty.config" access because generally
-@@ -1068,6 +1362,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1068,6 +1383,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          // use whatever the latest app-level config is.
          let config = ghostty.config
  
@@ -2135,7 +2156,7 @@ index 340a0b4..3393a31 100644
          // Setting all three of these is required for restoration to work.
          window.isRestorable = restorable
          if restorable {
-@@ -1083,9 +1383,36 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1083,9 +1404,36 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              focusedSurface = view
          }
  
@@ -2173,7 +2194,7 @@ index 340a0b4..3393a31 100644
          }
  
          // Set the initial content size on the container so that
-@@ -1095,7 +1422,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1443,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
  
          window.contentView = container
