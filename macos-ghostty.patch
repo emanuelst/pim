@@ -96,10 +96,10 @@ index ace9205..2ef2591 100644
      func hide() {
 diff --git a/macos/Sources/Features/Pim/PimSession.swift b/macos/Sources/Features/Pim/PimSession.swift
 new file mode 100644
-index 0000000..f7c7cf5
+index 0000000..d4e298b
 --- /dev/null
 +++ b/macos/Sources/Features/Pim/PimSession.swift
-@@ -0,0 +1,1658 @@
+@@ -0,0 +1,1674 @@
 +import AppKit
 +import Foundation
 +import SwiftUI
@@ -169,6 +169,7 @@ index 0000000..f7c7cf5
 +    let roles: [URL: String]
 +    let foregroundSession: URL?
 +    let liveElsewhere: Set<URL>
++    let ownedSessions: Set<URL>
 +}
 +
 +struct PimSearchResult: Identifiable, Hashable {
@@ -234,6 +235,7 @@ index 0000000..f7c7cf5
 +    @Published private(set) var activeSession: URL?
 +    @Published private(set) var activeStates: [URL: String] = [:]
 +    @Published private(set) var liveElsewhere: Set<URL> = []
++    @Published private(set) var ownedSessions: Set<URL> = []
 +    @Published private(set) var switchingTo: URL?
 +    @Published private(set) var launchFailureSession: URL?
 +    @Published private(set) var launchFailureMessage: String?
@@ -546,6 +548,7 @@ index 0000000..f7c7cf5
 +    private func applyStatus(_ status: PimStatusSnapshot) {
 +        if activeStates != status.states { activeStates = status.states }
 +        if liveElsewhere != status.liveElsewhere { liveElsewhere = status.liveElsewhere }
++        if ownedSessions != status.ownedSessions { ownedSessions = status.ownedSessions }
 +    }
 +
 +    /// Starts a visual switch without changing the session whose surface is
@@ -582,6 +585,7 @@ index 0000000..f7c7cf5
 +        var states: [URL: String] = [:]
 +        var roles: [URL: String] = [:]
 +        var liveElsewhere = Set<URL>()
++        var ownedSessions = Set<URL>()
 +        var newestForeground: (URL, Double)?
 +        if let files = try? FileManager.default.contentsOfDirectory(
 +            at: root,
@@ -626,7 +630,9 @@ index 0000000..f7c7cf5
 +                    states[session] = state
 +                }
 +                let ownerPid = (status["ownerPid"] as? NSNumber)?.intValue
-+                if ownerPid.map({ $0 != ProcessInfo.processInfo.processIdentifier }) ?? true {
++                if ownerPid == Int(ProcessInfo.processInfo.processIdentifier) {
++                    ownedSessions.insert(session)
++                } else {
 +                    liveElsewhere.insert(session)
 +                }
 +                let role = status["role"] as? String ?? "foreground"
@@ -640,7 +646,8 @@ index 0000000..f7c7cf5
 +            states: states,
 +            roles: roles,
 +            foregroundSession: newestForeground?.0,
-+            liveElsewhere: liveElsewhere)
++            liveElsewhere: liveElsewhere,
++            ownedSessions: ownedSessions)
 +    }
 +
 +    private nonisolated static func processExecutableName(_ pid: Int32) -> String? {
@@ -753,8 +760,11 @@ index 0000000..f7c7cf5
 +        for path in fallback + existing where !paths.contains(path) {
 +            paths.append(path)
 +        }
++        let agentPath = agentDirectory.path
 +        return [
 +            "PATH": paths.joined(separator: ":"),
++            "PIM_AGENT_DIR": agentPath,
++            "PI_CODING_AGENT_DIR": agentPath,
 +            "PIM_OWNER_PID": String(ProcessInfo.processInfo.processIdentifier),
 +        ]
 +    }
@@ -773,8 +783,14 @@ index 0000000..f7c7cf5
 +    }
 +
 +    private static func piCommand() -> String {
-+        let extensionPath = Bundle.main.url(forResource: "pim-bridge", withExtension: "ts")?.path
-+        let extensionArgument = piIntegrationInstalled ? "" : extensionPath.map { " -e \(quote($0))" } ?? ""
++        let bundledPath = Bundle.main.url(forResource: "pim-bridge", withExtension: "ts")?.path
++        let installedPath = agentDirectory
++            .appendingPathComponent("extensions", isDirectory: true)
++            .appendingPathComponent("pim-integration.ts").path
++        // Pass the bridge explicitly. Use the discovered copy when available so
++        // Pi's normal user extensions remain enabled without loading this bridge twice.
++        let extensionPath = piIntegrationInstalled ? installedPath : bundledPath
++        let extensionArgument = extensionPath.map { " -e \(quote($0))" } ?? ""
 +        return "\(quote(piExecutable))\(extensionArgument)"
 +    }
 +
@@ -1782,7 +1798,7 @@ index 7948810..367cbfe 100644
              undoManager.setActionName(undoAction)
          }
 diff --git a/macos/Sources/Features/Terminal/TerminalController.swift b/macos/Sources/Features/Terminal/TerminalController.swift
-index 340a0b4..f82ac79 100644
+index 340a0b4..3d73e87 100644
 --- a/macos/Sources/Features/Terminal/TerminalController.swift
 +++ b/macos/Sources/Features/Terminal/TerminalController.swift
 @@ -6,6 +6,10 @@ import GhosttyKit
@@ -1904,7 +1920,7 @@ index 340a0b4..f82ac79 100644
          terminalViewContainer?.ghosttyConfigDidChange(ghostty.config, preferredBackgroundColor: window.preferredBackgroundColor)
      }
  
-@@ -1051,6 +1097,292 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1051,6 +1097,282 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
      }
  
@@ -2033,8 +2049,7 @@ index 340a0b4..f82ac79 100644
 +        // The bridge publishes this only after Pi has loaded the session and
 +        // initialized its interactive mode. Do not replace the visible
 +        // terminal before that point.
-+        if pimSessionStore.activeStates[session.id] != nil,
-+           !pimSessionStore.liveElsewhere.contains(session.id) {
++        if pimSessionStore.ownedSessions.contains(session.id) {
 +            pimPendingSession = nil
 +            pimPendingSurface = nil
 +            pimPendingStartedAt = nil
@@ -2176,28 +2191,19 @@ index 340a0b4..f82ac79 100644
 +    }
 +
 +    private func newPimChat() {
-+        guard let ghosttyApp = ghostty.app,
-+              let session = pimSessionStore.createNewSession(
-+                cwd: PimSessionStore.workspaceDirectory()) else { return }
++        guard let session = pimSessionStore.createNewSession(
++            cwd: PimSessionStore.workspaceDirectory()) else { return }
 +        pimSessionStore.markRead(session)
-+        cancelPendingPimLaunch()
-+        let launchGeneration = pimLaunchGeneration
-+        retainCurrentPimSurfaceIfNeeded()
-+        var config = Ghostty.SurfaceConfiguration()
-+        config.workingDirectory = session.cwd
-+        config.command = PimSessionStore.pimBootstrapShellCommand()
-+        config.environmentVariables = PimSessionStore.childEnvironment()
-+        let view = Ghostty.SurfaceView(ghosttyApp, baseConfig: config)
-+        beginPimSurface(view, for: session)
-+        startPimProcess(view, for: session, generation: launchGeneration)
-+        pimSessionStore.requestActiveSession(session.id)
-+        finishPendingPimSurfaceIfReady()
++        // Use the same deferred launch path as existing chats. Creating a
++        // surface synchronously from the plus button can race Ghostty's run
++        // loop before its model and final size are ready.
++        openPimSession(session)
 +    }
 +
      // MARK: - NSWindowController
  
      override func windowWillLoad() {
-@@ -1061,6 +1393,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1061,6 +1383,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
      override func windowDidLoad() {
          super.windowDidLoad()
          guard let window else { return }
@@ -2205,7 +2211,7 @@ index 340a0b4..f82ac79 100644
  
          // I copy this because we may change the source in the future but also because
          // I regularly audit our codebase for "ghostty.config" access because generally
-@@ -1068,6 +1401,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1068,6 +1391,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          // use whatever the latest app-level config is.
          let config = ghostty.config
  
@@ -2218,7 +2224,7 @@ index 340a0b4..f82ac79 100644
          // Setting all three of these is required for restoration to work.
          window.isRestorable = restorable
          if restorable {
-@@ -1083,9 +1422,36 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1083,9 +1412,36 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
              focusedSurface = view
          }
  
@@ -2256,7 +2262,7 @@ index 340a0b4..f82ac79 100644
          }
  
          // Set the initial content size on the container so that
-@@ -1095,7 +1461,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
+@@ -1095,7 +1451,18 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
          container.initialContentSize = focusedSurface?.initialSize
  
          window.contentView = container
