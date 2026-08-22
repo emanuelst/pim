@@ -10,6 +10,7 @@ const ownerPid = Number(process.env.PIM_OWNER_PID);
 type ActivityState = "idle" | "working";
 let currentSession: string | undefined;
 let currentState: ActivityState = "idle";
+let interactiveReady = false;
 
 function publish(session: string | undefined, state: ActivityState | "stopped"): void {
 	if (state === "stopped") {
@@ -31,7 +32,7 @@ function publish(session: string | undefined, state: ActivityState | "stopped"):
 }
 
 const heartbeat = setInterval(() => {
-	if (currentSession) publish(currentSession, currentState);
+	if (interactiveReady && currentSession) publish(currentSession, currentState);
 }, 2_000);
 (heartbeat as NodeJS.Timeout).unref?.();
 
@@ -45,23 +46,40 @@ export default function pimBridge(pi: ExtensionAPI) {
 		},
 	});
 
+	const publishWhenInteractive = (session: string | undefined) => {
+		interactiveReady = false;
+		setImmediate(() => {
+			if (currentSession !== session || !session) return;
+			interactiveReady = true;
+			publish(session, currentState);
+		});
+	};
+
 	pi.on("session_start", (_event, ctx) => {
 		currentSession = ctx.sessionManager.getSessionFile();
 		currentState = "idle";
-		publish(currentSession, currentState);
+		publishWhenInteractive(currentSession);
+	});
+	pi.on("session_switch", (_event, ctx) => {
+		currentSession = ctx.sessionManager.getSessionFile();
+		currentState = "idle";
+		publishWhenInteractive(currentSession);
 	});
 	pi.on("session_shutdown", () => {
+		interactiveReady = false;
 		currentSession = undefined;
 		publish(undefined, "stopped");
 	});
 	pi.on("agent_start", (_event, ctx) => {
 		currentSession = ctx.sessionManager.getSessionFile();
 		currentState = "working";
+		interactiveReady = true;
 		publish(currentSession, currentState);
 	});
 	pi.on("agent_settled", (_event, ctx) => {
 		currentSession = ctx.sessionManager.getSessionFile();
 		currentState = "idle";
+		interactiveReady = true;
 		publish(currentSession, currentState);
 	});
 }
