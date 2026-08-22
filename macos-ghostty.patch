@@ -2219,7 +2219,7 @@ index bfe42b1..1c8aca7 100644
              guard let config = self.config else { return defaultValue }
              var v: UnsafePointer<Int8>?
 diff --git a/macos/Sources/Ghostty/Ghostty.Surface.swift b/macos/Sources/Ghostty/Ghostty.Surface.swift
-index a076063..a182fe5 100644
+index a076063..1685131 100644
 --- a/macos/Sources/Ghostty/Ghostty.Surface.swift
 +++ b/macos/Sources/Ghostty/Ghostty.Surface.swift
 @@ -1,5 +1,65 @@
@@ -2296,7 +2296,7 @@ index a076063..a182fe5 100644
  
          /// Read the underlying C value for this surface. This is unsafe because the value will be
          /// freed when the Surface class is deinitialized.
-@@ -44,6 +105,56 @@ extension Ghostty {
+@@ -44,6 +105,52 @@ extension Ghostty {
              }
          }
  
@@ -2314,88 +2314,72 @@ index a076063..a182fe5 100644
 +                completion: completion)
 +        }
 +
-+        /// Submit a Pim session switch without blocking AppKit on libghostty input.
++        /// Send text for a Pim session switch. This is called from AppKit's main
++        /// actor; keeping the libghostty call there is important because terminal
++        /// actions can update SwiftUI/AppKit state synchronously.
 +        nonisolated func sendPimResume(_ text: String) {
-+            let surface = self.surface
-+            Self.pimInputQueue.async {
-+                let length = text.utf8CString.count
-+                guard length > 1 else { return }
-+                text.withCString { ptr in
-+                    ghostty_surface_text(surface, ptr, UInt(length - 1))
-+                }
++            let length = text.utf8CString.count
++            guard length > 1 else { return }
++            text.withCString { ptr in
++                ghostty_surface_text(surface, ptr, UInt(length - 1))
 +            }
 +        }
 +
-+        /// Send Pim focus state without blocking AppKit on libghostty input.
++        /// Send Pim focus state from AppKit's main actor. Do not move this to a
++        /// background queue: focus changes can synchronously update SwiftUI state.
 +        nonisolated func sendPimFocus(_ focused: Bool) {
-+            let surface = self.surface
-+            Self.pimInputQueue.async {
-+                ghostty_surface_set_focus(surface, focused)
-+            }
++            ghostty_surface_set_focus(surface, focused)
 +        }
 +
-+        /// Send a Pim mouse button event without blocking AppKit on libghostty input.
++        /// Send Pim mouse button events from AppKit's main actor. libghostty may
++        /// emit UI actions while handling the event, so these must not run on a
++        /// background queue.
 +        nonisolated func sendPimMouseButton(
 +            _ state: ghostty_input_mouse_state_e,
 +            _ button: ghostty_input_mouse_button_e,
 +            _ mods: ghostty_input_mods_e,
 +            releasePressure: Bool = false
 +        ) {
-+            let surface = self.surface
-+            Self.pimInputQueue.async {
-+                ghostty_surface_mouse_button(surface, state, button, mods)
-+                if releasePressure {
-+                    ghostty_surface_mouse_pressure(surface, 0, 0)
-+                }
++            ghostty_surface_mouse_button(surface, state, button, mods)
++            if releasePressure {
++                ghostty_surface_mouse_pressure(surface, 0, 0)
 +            }
 +        }
 +
          /// Send text to the terminal as if it was typed. This doesn't send the key events so keyboard
          /// shortcuts and other encodings do not take effect.
          @MainActor
-@@ -141,6 +252,16 @@ extension Ghostty {
+@@ -141,6 +248,13 @@ extension Ghostty {
          /// - Parameter event: The mouse position event to send to the terminal
          @MainActor
          func sendMousePos(_ event: Input.MousePosEvent) {
 +            if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
-+                let surface = self.surface
-+                let x = event.x
-+                let y = event.y
-+                let mods = event.mods.cMods
-+                Self.pimInputQueue.async {
-+                    ghostty_surface_mouse_pos(surface, x, y, mods)
-+                }
++                // Mouse movement can emit cursor/link actions that update
++                // SwiftUI state. Handle it on AppKit's main actor rather than
++                // racing Combine's ObservableObjectPublisher from a worker.
++                ghostty_surface_mouse_pos(surface, event.x, event.y, event.mods.cMods)
 +                return
 +            }
              ghostty_surface_mouse_pos(
                  surface,
                  event.x,
-@@ -157,6 +278,16 @@ extension Ghostty {
+@@ -157,6 +271,16 @@ extension Ghostty {
          /// - Parameter event: The mouse scroll event to send to the terminal
          @MainActor
          func sendMouseScroll(_ event: Input.MouseScrollEvent) {
 +            if Bundle.main.bundleURL.lastPathComponent == "Pim.app" {
-+                let surface = self.surface
-+                let x = event.x
-+                let y = event.y
-+                let mods = event.mods.cScrollMods
-+                Self.pimInputQueue.async {
-+                    ghostty_surface_mouse_scroll(surface, x, y, mods)
-+                }
++                // Scroll events can also produce terminal actions. Keep their
++                // callbacks on the main actor just like normal Ghostty input.
++                ghostty_surface_mouse_scroll(
++                    surface,
++                    event.x,
++                    event.y,
++                    event.mods.cScrollMods)
 +                return
 +            }
              ghostty_surface_mouse_scroll(
                  surface,
                  event.x,
-@@ -164,6 +295,8 @@ extension Ghostty {
-                 event.mods.cScrollMods)
-         }
- 
-+        private static let pimInputQueue = DispatchQueue(label: "com.pim.surface-input", qos: .userInteractive)
-+
-         /// Perform a keybinding action.
-         ///
-         /// The action can be any valid keybind parameter. e.g. `keybind = goto_tab:4`
 diff --git a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift b/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
 index 0dbdeef..289acb7 100644
 --- a/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift	
