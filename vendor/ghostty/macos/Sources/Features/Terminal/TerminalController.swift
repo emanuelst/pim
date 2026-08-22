@@ -1132,7 +1132,6 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                   self.pimPendingSession?.id == session.id else { return }
             let view = self.makePimSurface(session, app: ghosttyApp)
             self.beginPimSurface(view, for: session)
-            self.startPimProcess(view, for: session, generation: launchGeneration)
             self.finishPendingPimSurfaceIfReady()
         }
     }
@@ -1140,44 +1139,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     private func makePimSurface(_ session: PimSession, app: ghostty_app_t) -> Ghostty.SurfaceView {
         var config = Ghostty.SurfaceConfiguration()
         config.workingDirectory = session.cwd
-        // Start a shell first. Pi is started after the surface returns to the
-        // run loop so a large session cannot block AppKit during construction.
-        config.command = PimSessionStore.pimBootstrapShellCommand()
+        // Run Pi directly. Sending `exec pi ...` into a newly-created shell is
+        // racy: the input can arrive before the shell is interactive, leaving
+        // Pim waiting forever even though Ghostty itself is healthy.
+        config.command = PimSessionStore.launchCommand(for: session)
         config.environmentVariables = PimSessionStore.childEnvironment()
         return Ghostty.SurfaceView(app, baseConfig: config)
-    }
-
-    private func startPimProcess(
-        _ view: Ghostty.SurfaceView,
-        for session: PimSession,
-        generation: Int
-    ) {
-        let launch = { [weak self, weak view] in
-            guard let self, let view,
-                  self.pimLaunchGeneration == generation,
-                  self.pimPendingSurface === view,
-                  self.pimPendingSession?.id == session.id,
-                  !view.processExited else { return }
-            view.surfaceModel?.sendPimResume(PimSessionStore.launchInput(for: session))
-        }
-
-        guard let targetSize = focusedSurface?.surfaceSize,
-              targetSize.width_px > 0,
-              targetSize.height_px > 0,
-              let surfaceModel = view.surfaceModel else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: launch)
-            return
-        }
-
-        // Match the visible terminal size before Pi replays the transcript.
-        // Otherwise Pi first renders at the 800x600 bootstrap size and then
-        // reflows again when the surface enters the split view.
-        surfaceModel.sendPimSurfaceSize(
-            width: targetSize.width_px,
-            height: targetSize.height_px) { [weak view] size in
-                view?.surfaceSize = size
-                DispatchQueue.main.async(execute: launch)
-            }
     }
 
     private func beginPimSurface(_ view: Ghostty.SurfaceView, for session: PimSession) {
